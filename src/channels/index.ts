@@ -19,4 +19,4 @@ import './gmail.js';
 import './telegram.js';
 
 // whatsapp
-import './whatsapp.js';
+// import './whatsapp.js'; // disabled
