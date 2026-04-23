@@ -11,7 +11,7 @@ import './cli.js';
 // discord
 
 // gmail
-import './gmail.js';
+// import './gmail.js'; // not yet ported to v2
 
 // slack
 
@@ -19,4 +19,4 @@ import './gmail.js';
 import './telegram.js';
 
 // whatsapp
-// import './whatsapp.js'; // disabled
+// import './whatsapp.js'; // not yet ported to v2
