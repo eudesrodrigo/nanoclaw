@@ -11,6 +11,7 @@ import './cli.js';
 // discord
 
 // gmail
+import './gmail.js';
 
 // slack
 

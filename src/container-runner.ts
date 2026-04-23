@@ -5,6 +5,7 @@
  */
 import { ChildProcess, execSync, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -302,6 +303,17 @@ function buildMounts(
   // Provider-contributed mounts (e.g. opencode-xdg)
   if (providerContribution.mounts) {
     mounts.push(...providerContribution.mounts);
+  }
+
+  // Gmail credentials directory (for Gmail MCP inside the container)
+  const homeDir = os.homedir();
+  const gmailDir = path.join(homeDir, '.gmail-mcp');
+  if (fs.existsSync(gmailDir)) {
+    mounts.push({
+      hostPath: gmailDir,
+      containerPath: '/home/node/.gmail-mcp',
+      readonly: false,
+    });
   }
 
   return mounts;
