@@ -73,11 +73,11 @@ async function main(): Promise<void> {
   cleanupOrphans();
 
   // 2b. Start credential proxy (containers route API calls through this)
-  const proxyServer = await startCredentialProxy(
-    CREDENTIAL_PROXY_PORT,
-    PROXY_BIND_HOST,
-  );
-  onShutdown(() => { proxyServer.close(); return Promise.resolve(); });
+  const proxyServer = await startCredentialProxy(CREDENTIAL_PROXY_PORT, PROXY_BIND_HOST);
+  onShutdown(() => {
+    proxyServer.close();
+    return Promise.resolve();
+  });
 
   // 3. Channel adapters
   await initChannelAdapters((adapter: ChannelAdapter): ChannelSetup => {
