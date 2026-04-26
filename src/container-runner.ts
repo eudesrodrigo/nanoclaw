@@ -16,8 +16,10 @@ import {
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
+  ONECLI_URL,
   TIMEZONE,
 } from './config.js';
+import { OneCLI } from '@onecli-sh/sdk';
 import { readContainerConfig, writeContainerConfig } from './container-config.js';
 import { CONTAINER_HOST_GATEWAY, CONTAINER_RUNTIME_BIN, hostGatewayArgs, readonlyMountArgs, stopContainer } from './container-runtime.js';
 import { composeGroupClaudeMd } from './claude-md-compose.js';
@@ -449,6 +451,16 @@ async function buildContainerArgs(
 
   // Host gateway
   args.push(...hostGatewayArgs());
+
+  // OneCLI gateway — route outbound HTTPS through the credential vault
+  // so containers get OAuth tokens injected for GitHub, Gmail, etc.
+  if (ONECLI_URL) {
+    const onecli = new OneCLI({ url: ONECLI_URL });
+    const applied = await onecli.applyContainerConfig(args);
+    if (!applied) {
+      log.warn('OneCLI gateway unreachable — containers will not have credential injection');
+    }
+  }
 
   // User mapping
   const hostUid = process.getuid?.();

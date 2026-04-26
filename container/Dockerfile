@@ -22,6 +22,7 @@ ARG INSTALL_CJK_FONTS=false
 ARG CLAUDE_CODE_VERSION=2.1.116
 ARG AGENT_BROWSER_VERSION=latest
 ARG VERCEL_VERSION=latest
+ARG GH_VERSION=2.91.0
 ARG BUN_VERSION=1.3.12
 
 # ---- System dependencies -----------------------------------------------------
@@ -62,6 +63,11 @@ ENV PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 # Belt-and-braces: prevent Playwright's postinstall from downloading its own
 # ~300MB Chromium. We've already installed the system one above.
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+# Anti-bot stealth: disable webdriver detection flag and spoof user-agent
+ENV AGENT_BROWSER_ARGS="--disable-blink-features=AutomationControlled"
+ENV AGENT_BROWSER_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+# gh CLI: placeholder token — OneCLI proxy replaces with real OAuth token
+ENV GH_TOKEN=onecli-managed
 
 # ---- Bun runtime -------------------------------------------------------------
 # Install via the official script (handles multi-arch detection), then move
@@ -69,6 +75,13 @@ ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 RUN curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}" && \
     install -m 0755 /root/.bun/bin/bun /usr/local/bin/bun && \
     rm -rf /root/.bun
+
+# ---- GitHub CLI (gh) ---------------------------------------------------------
+# Binary download (not in Debian apt). Pinned for reproducibility.
+RUN curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_$(dpkg --print-architecture).tar.gz" | \
+    tar xz -C /tmp && \
+    install -m 0755 "/tmp/gh_${GH_VERSION}_linux_$(dpkg --print-architecture)/bin/gh" /usr/local/bin/gh && \
+    rm -rf /tmp/gh_*
 
 # ---- agent-runner deps -------------------------------------------------------
 # Deps are cached independently of CLI versions. Source is NOT baked in —

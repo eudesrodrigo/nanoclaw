@@ -11,6 +11,10 @@
 
 set -e
 
+# Persist agent-browser auth vault on the host-mounted group volume
+mkdir -p /workspace/agent/.agent-browser
+ln -sfn /workspace/agent/.agent-browser "$HOME/.agent-browser"
+
 cat > /tmp/input.json
 
 exec bun run /app/src/index.ts < /tmp/input.json
