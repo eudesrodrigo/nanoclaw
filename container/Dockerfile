@@ -22,6 +22,9 @@ ARG INSTALL_CJK_FONTS=false
 ARG CLAUDE_CODE_VERSION=2.1.116
 ARG AGENT_BROWSER_VERSION=latest
 ARG VERCEL_VERSION=latest
+ARG GMAIL_MCP_VERSION=1.1.11
+ARG GOOGLE_CALENDAR_MCP_VERSION=2.6.1
+ARG GOOGLE_DRIVE_MCP_VERSION=2.2.0
 ARG GH_VERSION=2.91.0
 ARG BUN_VERSION=1.3.12
 
@@ -116,6 +119,12 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+
+RUN --mount=type=cache,target=/root/.cache/pnpm \
+    pnpm install -g \
+        "@gongrzhe/server-gmail-autoauth-mcp@${GMAIL_MCP_VERSION}" \
+        "@cocal/google-calendar-mcp@${GOOGLE_CALENDAR_MCP_VERSION}" \
+        "@piotr-agier/google-drive-mcp@${GOOGLE_DRIVE_MCP_VERSION}"
 
 # ---- Entrypoint --------------------------------------------------------------
 COPY entrypoint.sh /app/entrypoint.sh

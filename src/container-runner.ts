@@ -306,13 +306,31 @@ function buildMounts(
     mounts.push(...providerContribution.mounts);
   }
 
-  // Gmail credentials directory (for Gmail MCP inside the container)
+  // Google service credentials (for MCP servers inside the container)
   const homeDir = os.homedir();
   const gmailDir = path.join(homeDir, '.gmail-mcp');
   if (fs.existsSync(gmailDir)) {
     mounts.push({
       hostPath: gmailDir,
       containerPath: '/home/node/.gmail-mcp',
+      readonly: false,
+    });
+  }
+
+  const calendarDir = path.join(homeDir, '.config', 'google-calendar-mcp');
+  if (fs.existsSync(calendarDir)) {
+    mounts.push({
+      hostPath: calendarDir,
+      containerPath: '/home/node/.config/google-calendar-mcp',
+      readonly: false,
+    });
+  }
+
+  const driveDir = path.join(homeDir, '.config', 'google-drive-mcp');
+  if (fs.existsSync(driveDir)) {
+    mounts.push({
+      hostPath: driveDir,
+      containerPath: '/home/node/.config/google-drive-mcp',
       readonly: false,
     });
   }
