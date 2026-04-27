@@ -38,4 +38,7 @@ groups/*
 # Skills system (local per-installation state)
 .nanoclaw/
 
+# Remember plugin (local state)
+.remember/
+
 agents-sdk-docs
