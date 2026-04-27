@@ -248,17 +248,17 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
         await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, true, false));
       });
 
-      // Plain messages in unsubscribed threads.
+      // All messages in unsubscribed threads (text, attachments, or both).
       //
       // Chat SDK dispatch (handling-events.mdx §"Handler dispatch order") is
       // exclusive: subscribed → onSubscribedMessage; unsubscribed+mention →
-      // onNewMention; unsubscribed+pattern-match → onNewMessage. Registering
-      // with `/./` lets the router see every plain message on every
-      // unsubscribed thread the bot can see. The router short-circuits via
-      // getMessagingGroupWithAgentCount (~1 DB read) for unwired channels,
-      // so forwarding every one is cheap enough to not need a bridge-side
-      // flood gate.
-      chat.onNewMessage(/./, async (thread, message) => {
+      // onNewMention; unsubscribed+pattern-match → onNewMessage. We use
+      // /(?:)/ (zero-width match) instead of /./ so attachment-only messages
+      // (empty text) also match — /./ silently drops them because
+      // pattern.test("") is false. The guard skips service messages (group
+      // renames, photo changes) that carry neither text nor attachments.
+      chat.onNewMessage(/(?:)/, async (thread, message) => {
+        if (!message.text && (!message.attachments || message.attachments.length === 0)) return;
         const channelId = adapter.channelIdFromThreadId(thread.id);
         await setupConfig.onInbound(channelId, thread.id, await messageToInbound(message, false, true));
       });

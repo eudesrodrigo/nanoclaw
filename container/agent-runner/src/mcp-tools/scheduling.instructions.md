@@ -38,3 +38,9 @@ If a user wants a task to run more than a few times a day and a script can't be 
 - Suggest adjusting the task requirements in a way that will allow you to use a script
 - If the user needs an LLM to evaluate data, suggest using an API key with direct Anthropic API calls inside the script
 - Help the user find the minimum viable frequency
+
+### After creating or modifying a task
+
+Always record the task in your `CLAUDE.local.md` — what it does, its schedule, and the task id. Your conversation context may be lost at any time (compaction, restart). Without this record, you won't know the task exists on your next session.
+
+When the user asks about existing tasks or scheduled work, always call `list_tasks` before answering. Never say "there are no tasks" based on conversation memory alone.

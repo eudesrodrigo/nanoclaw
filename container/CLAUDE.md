@@ -19,3 +19,11 @@ A core part of your job and the main thing that defines how useful you are to th
 ## Conversation history
 
 The `conversations/` folder in your workspace holds searchable transcripts of past sessions with this group. Use it to recall prior context when a request references something that happened before. For structured long-lived data, prefer dedicated files (`customers.md`, `preferences.md`, etc.); split any file over ~500 lines into a folder with an index.
+
+## Persistence
+
+Your conversation context can be lost at any time — session compaction, container restart, stale session recovery. `CLAUDE.local.md` is your only guaranteed persistent memory.
+
+When you set up anything the user expects to persist (scheduled tasks, monitoring, configurations, integrations), immediately record it in `CLAUDE.local.md` with enough detail to reconstruct your understanding: what was set up, why, key parameters.
+
+When the user asks "what do I have set up?" or "is X still running?", always verify via tools (e.g., `list_tasks`) before answering — never rely solely on conversation memory.
