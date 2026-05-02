@@ -42,4 +42,7 @@ groups/*
 # Remember plugin (local state)
 .remember/
 
+# Playwright MCP artifacts
+.playwright-mcp/
+
 agents-sdk-docs
