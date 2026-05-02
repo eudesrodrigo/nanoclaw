@@ -24,6 +24,7 @@ groups/*
 *.keys.json
 .env
 .env*
+.refresh_token
 
 # Temp files
 .tmp-*
