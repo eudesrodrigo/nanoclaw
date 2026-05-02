@@ -50,6 +50,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         libcups2 \
         libdrm2 \
         libxshmfence1 \
+        python3-minimal \
+        python3-pip \
         ca-certificates \
         curl \
         git \
@@ -95,6 +97,11 @@ COPY agent-runner/package.json agent-runner/bun.lock ./
 
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun install --frozen-lockfile
+
+# ---- http-clients (Python) ---------------------------------------------------
+COPY http-clients/ /tmp/http-clients/
+RUN pip install --break-system-packages /tmp/http-clients/ && rm -rf /tmp/http-clients/
+ENV HTTP_CLIENTS_TOKENS=/workspace/extra/http-clients/tokens.json
 
 # ---- pnpm + global Node CLIs -------------------------------------------------
 # Most stable first, most frequently bumped last. Bumping claude-code
