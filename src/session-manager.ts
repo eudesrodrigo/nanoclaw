@@ -252,6 +252,10 @@ function extractAttachmentFiles(
   let changed = false;
   for (const att of attachments) {
     if (typeof att.data === 'string') {
+      // Audio stays as base64 in the content — the container's audio transcriber
+      // reads it directly and never needs a file on disk.
+      if (att.type === 'audio') continue;
+
       const inboxDir = path.join(sessionDir(agentGroupId, sessionId), 'inbox', messageId);
       fs.mkdirSync(inboxDir, { recursive: true });
       const filename = (att.name as string) || `attachment-${Date.now()}`;

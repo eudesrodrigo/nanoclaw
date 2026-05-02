@@ -47,6 +47,8 @@ export interface ContainerConfig {
   agentGroupId?: string;
   /** Max messages per prompt. Falls back to code default if unset. */
   maxMessagesPerPrompt?: number;
+  /** Audio transcription via an external model (e.g. Gemini). */
+  audioTranscription?: { model: string };
 }
 
 function emptyConfig(): ContainerConfig {
@@ -87,6 +89,7 @@ export function readContainerConfig(folder: string): ContainerConfig {
       assistantName: raw.assistantName,
       agentGroupId: raw.agentGroupId,
       maxMessagesPerPrompt: raw.maxMessagesPerPrompt,
+      audioTranscription: raw.audioTranscription,
     };
   } catch (err) {
     console.error(`[container-config] failed to parse ${p}: ${String(err)}`);

@@ -223,6 +223,14 @@ function formatReplyContext(replyTo: any): string {
 function formatAttachments(attachments: any[] | undefined): string {
   if (!Array.isArray(attachments) || attachments.length === 0) return '';
   const parts = attachments.map((a) => {
+    if (a.type === 'audio' && a.transcription) {
+      return `[voice message: "${escapeXml(a.transcription)}"]`;
+    }
+    if (a.type === 'audio' && a.transcriptionError) {
+      const name = a.name || 'audio';
+      return `[audio: ${escapeXml(name)} — transcription failed: ${escapeXml(a.transcriptionError)}]`;
+    }
+
     const name = a.name || a.filename || 'attachment';
     const type = a.type || 'file';
     const localPath = a.localPath ? `/workspace/${a.localPath}` : '';

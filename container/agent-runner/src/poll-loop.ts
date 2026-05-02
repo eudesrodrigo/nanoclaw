@@ -4,6 +4,8 @@ import { writeMessageOut } from './db/messages-out.js';
 import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import { getStoredSessionId, setStoredSessionId, clearStoredSessionId } from './db/session-state.js';
 import { formatMessages, extractRouting, categorizeMessage, isClearCommand, stripInternalTags, type RoutingContext } from './formatter.js';
+import { transcribeAudioInMessages } from './audio-transcriber.js';
+import { getConfig } from './config.js';
 import type { AgentProvider, AgentQuery, ProviderEvent } from './providers/types.js';
 
 const POLL_INTERVAL_MS = 1000;
@@ -143,6 +145,12 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
       continue;
     }
 
+    // Transcribe audio attachments before formatting.
+    const runnerConfig = getConfig();
+    if (runnerConfig.audioTranscription) {
+      await transcribeAudioInMessages(keep, runnerConfig.audioTranscription);
+    }
+
     // Format messages: passthrough commands get raw text (only if the
     // provider natively handles slash commands), others get XML.
     const prompt = formatMessagesWithCommands(keep, config.provider.supportsNativeSlashCommands);
@@ -248,41 +256,55 @@ async function processQuery(
   // Stream liveness is decided host-side via the heartbeat file + processing
   // claim age (see src/host-sweep.ts); if something is truly stuck, the host
   // will kill the container and messages get reset to pending.
-  const pollHandle = setInterval(() => {
-    if (done) return;
+  //
+  // Uses recursive setTimeout instead of setInterval so we can await async
+  // work (audio transcription) without overlapping ticks.
+  let pollTimeout: ReturnType<typeof setTimeout>;
+  const schedulePoll = (): void => {
+    pollTimeout = setTimeout(async () => {
+      if (done) return;
 
-    const allPending = getPendingMessages();
+      const allPending = getPendingMessages();
 
-    // If a /clear arrived, abort the current query so the main loop
-    // can process it on the next iteration (it needs a fresh query).
-    if (allPending.some((m) => (m.kind === 'chat' || m.kind === 'chat-sdk') && isClearCommand(m))) {
-      log('Aborting query — /clear pending');
-      query.abort();
-      return;
-    }
+      // If a /clear arrived, abort the current query so the main loop
+      // can process it on the next iteration (it needs a fresh query).
+      if (allPending.some((m) => (m.kind === 'chat' || m.kind === 'chat-sdk') && isClearCommand(m))) {
+        log('Aborting query — /clear pending');
+        query.abort();
+        return;
+      }
 
-    // Skip system messages (MCP tool responses).
-    // Thread routing is the router's concern — if a message landed in this
-    // session, the agent should see it. Per-thread sessions already isolate
-    // threads into separate containers; shared sessions intentionally merge
-    // everything. Filtering on thread_id here caused deadlocks when the
-    // initial batch and follow-ups had mismatched thread_ids (e.g. a
-    // host-generated welcome trigger with null thread vs a Discord DM reply).
-    const newMessages = allPending.filter((m) => {
-      if (m.kind === 'system') return false;
-      return true;
-    });
-    if (newMessages.length > 0) {
-      const newIds = newMessages.map((m) => m.id);
-      markProcessing(newIds);
+      // Skip system messages (MCP tool responses).
+      // Thread routing is the router's concern — if a message landed in this
+      // session, the agent should see it. Per-thread sessions already isolate
+      // threads into separate containers; shared sessions intentionally merge
+      // everything. Filtering on thread_id here caused deadlocks when the
+      // initial batch and follow-ups had mismatched thread_ids (e.g. a
+      // host-generated welcome trigger with null thread vs a Discord DM reply).
+      const newMessages = allPending.filter((m) => {
+        if (m.kind === 'system') return false;
+        return true;
+      });
+      if (newMessages.length > 0) {
+        const newIds = newMessages.map((m) => m.id);
+        markProcessing(newIds);
 
-      const prompt = formatMessages(newMessages);
-      log(`Pushing ${newMessages.length} follow-up message(s) into active query`);
-      query.push(prompt);
+        const runnerConfig = getConfig();
+        if (runnerConfig.audioTranscription) {
+          await transcribeAudioInMessages(newMessages, runnerConfig.audioTranscription);
+        }
 
-      markCompleted(newIds);
-    }
-  }, ACTIVE_POLL_INTERVAL_MS);
+        const prompt = formatMessages(newMessages);
+        log(`Pushing ${newMessages.length} follow-up message(s) into active query`);
+        query.push(prompt);
+
+        markCompleted(newIds);
+      }
+
+      if (!done) schedulePoll();
+    }, ACTIVE_POLL_INTERVAL_MS);
+  };
+  schedulePoll();
 
   try {
     for await (const event of query.events) {
@@ -313,7 +335,7 @@ async function processQuery(
     }
   } finally {
     done = true;
-    clearInterval(pollHandle);
+    clearTimeout(pollTimeout);
   }
 
   return { continuation: queryContinuation };
