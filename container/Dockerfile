@@ -113,7 +113,7 @@ ENV HTTP_CLIENTS_TOKENS=/workspace/extra/http-clients/tokens.json
 #     binary (linux-arm64 variant on our image). Without the allowlist
 #     the SDK fails at spawn time with "native binary not found".
 ENV PNPM_HOME="/pnpm"
-ENV PATH="$PNPM_HOME:$PATH"
+ENV PATH="$PNPM_HOME:$PNPM_HOME/bin:$PATH"
 RUN corepack enable
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
@@ -128,6 +128,7 @@ RUN --mount=type=cache,target=/root/.cache/pnpm \
     pnpm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
 RUN --mount=type=cache,target=/root/.cache/pnpm \
+    echo 'overrides={"zod-to-json-schema":"3.24.6"}' >> /root/.npmrc && \
     pnpm install -g \
         "@gongrzhe/server-gmail-autoauth-mcp@${GMAIL_MCP_VERSION}" \
         "@cocal/google-calendar-mcp@${GOOGLE_CALENDAR_MCP_VERSION}" \
