@@ -3,6 +3,7 @@ import { getPendingMessages, markProcessing, markCompleted, type MessageInRow } 
 import { writeMessageOut } from './db/messages-out.js';
 import { touchHeartbeat, clearStaleProcessingAcks } from './db/connection.js';
 import { getStoredSessionId, setStoredSessionId, clearStoredSessionId } from './db/session-state.js';
+import { getSessionRouting } from './db/session-routing.js';
 import { formatMessages, extractRouting, categorizeMessage, isClearCommand, stripInternalTags, type RoutingContext } from './formatter.js';
 import { transcribeAudioInMessages } from './audio-transcriber.js';
 import { getConfig } from './config.js';
@@ -405,15 +406,30 @@ function dispatchResultText(text: string, routing: RoutingContext): void {
   // the session's originating channel (from session_routing) if available,
   // otherwise fall back to the single destination.
   if (sent === 0 && scratchpad) {
-    if (routing.channelType && routing.platformId) {
-      // Reply to the channel/thread the message came from
+    let effectiveRouting = routing;
+    if (!routing.channelType || !routing.platformId) {
+      // Message-based routing can be empty when the batch started with a
+      // task/system row. Fall back to session_routing (host-written on wake).
+      try {
+        const sr = getSessionRouting();
+        if (sr.channel_type && sr.platform_id) {
+          effectiveRouting = {
+            channelType: sr.channel_type,
+            platformId: sr.platform_id,
+            threadId: routing.threadId ?? sr.thread_id,
+            inReplyTo: routing.inReplyTo,
+          };
+        }
+      } catch { /* table may not exist on older session DBs */ }
+    }
+    if (effectiveRouting.channelType && effectiveRouting.platformId) {
       writeMessageOut({
         id: generateId(),
-        in_reply_to: routing.inReplyTo,
+        in_reply_to: effectiveRouting.inReplyTo,
         kind: 'chat',
-        platform_id: routing.platformId,
-        channel_type: routing.channelType,
-        thread_id: routing.threadId,
+        platform_id: effectiveRouting.platformId,
+        channel_type: effectiveRouting.channelType,
+        thread_id: effectiveRouting.threadId,
         content: JSON.stringify({ text: scratchpad }),
       });
       return;

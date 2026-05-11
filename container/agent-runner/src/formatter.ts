@@ -90,15 +90,19 @@ export interface RoutingContext {
 
 /**
  * Extract routing context from a batch of messages.
- * Uses the first message's routing fields.
+ * Prefers the first message that carries routing fields (platform_id +
+ * channel_type). Task and system messages don't have routing; when they
+ * appear first in a chronological batch the naive messages[0] pick missed
+ * the chat message's routing and the single-destination shortcut silently
+ * dropped the response into scratchpad.
  */
 export function extractRouting(messages: MessageInRow[]): RoutingContext {
-  const first = messages[0];
+  const routed = messages.find((m) => m.platform_id && m.channel_type) ?? messages[0];
   return {
-    platformId: first?.platform_id ?? null,
-    channelType: first?.channel_type ?? null,
-    threadId: first?.thread_id ?? null,
-    inReplyTo: first?.id ?? null,
+    platformId: routed?.platform_id ?? null,
+    channelType: routed?.channel_type ?? null,
+    threadId: routed?.thread_id ?? null,
+    inReplyTo: routed?.id ?? null,
   };
 }
 
