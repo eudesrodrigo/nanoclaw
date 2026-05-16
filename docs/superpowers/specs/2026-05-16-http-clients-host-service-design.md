@@ -152,12 +152,20 @@ OTP codes transit through the agent (user → Telegram → agent → host servic
 
 ## What Changes
 
+### Removals (old integration — clean up first)
+
+| Target | Lines | Action |
+|--------|-------|--------|
+| `container/Dockerfile` — http-clients block | 101-104 | **REMOVE** COPY, pip install, ENV HTTP_CLIENTS_TOKENS |
+| `container/build.sh` — rsync staging | 35-43 | **REMOVE** HTTP_CLIENTS_SRC, rsync, trap cleanup |
+| `groups/dm-with-eudes/container.json` — additionalMounts | 49-50 | **REMOVE** http-clients mount entry |
+| `groups/dm-with-home/container.json` — additionalMounts | 48-49 | **REMOVE** http-clients mount entry |
+
+### New and modified
+
 | Target | Action |
 |--------|--------|
-| `container/Dockerfile` — http-clients block (COPY + pip install + ENV) | **REMOVE** |
-| `container/build.sh` — rsync of http-clients source | **REMOVE** |
-| `groups/*/container.json` — `additionalMounts` for http-clients | **REMOVE** |
-| `groups/dm-with-eudes/costco/check_receipts.py` | **REWRITE** (HTTP to host) |
+| `groups/dm-with-eudes/costco/check_receipts.py` | **REWRITE** (HTTP to host service, no Python imports) |
 | Host macOS Python environment | **INSTALL** `pip install /Projects/http-clients` |
 | `src/http-clients-service.ts` | **NEW** (~100 lines) |
 | `container/agent-runner/src/mcp-tools/http-clients.ts` | **NEW** (~60 lines) |
