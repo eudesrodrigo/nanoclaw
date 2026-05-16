@@ -14,6 +14,7 @@ import {
   CONTAINER_INSTALL_LABEL,
   CONTAINER_TIMEOUT,
   CREDENTIAL_PROXY_PORT,
+  HTTP_CLIENTS_PORT,
   DATA_DIR,
   GROUPS_DIR,
   IDLE_TIMEOUT,
@@ -452,6 +453,7 @@ async function buildContainerArgs(
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push('-e', `ANTHROPIC_BASE_URL=http://${CONTAINER_HOST_GATEWAY}:${CREDENTIAL_PROXY_PORT}`);
+  args.push('-e', `HTTP_CLIENTS_URL=http://${CONTAINER_HOST_GATEWAY}:${HTTP_CLIENTS_PORT}`);
 
   // Mirror the host's auth method with a placeholder value.
   // API key mode: SDK sends x-api-key, proxy replaces with real key.
