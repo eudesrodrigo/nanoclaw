@@ -6,8 +6,9 @@
  */
 import path from 'path';
 
-import { CREDENTIAL_PROXY_PORT, DATA_DIR } from './config.js';
+import { CREDENTIAL_PROXY_PORT, HTTP_CLIENTS_PORT, DATA_DIR } from './config.js';
 import { startCredentialProxy } from './credential-proxy.js';
+import { startHttpClientsService } from './http-clients-service.js';
 import { migrateGroupsToClaudeLocal } from './claude-md-compose.js';
 import { initDb } from './db/connection.js';
 import { runMigrations } from './db/migrations/index.js';
@@ -76,6 +77,13 @@ async function main(): Promise<void> {
   const proxyServer = await startCredentialProxy(CREDENTIAL_PROXY_PORT, PROXY_BIND_HOST);
   onShutdown(() => {
     proxyServer.close();
+    return Promise.resolve();
+  });
+
+  // 2c. Start http-clients host service (containers call APIs through this)
+  const httpClientsServer = await startHttpClientsService(HTTP_CLIENTS_PORT, PROXY_BIND_HOST);
+  onShutdown(() => {
+    httpClientsServer.close();
     return Promise.resolve();
   });
 
