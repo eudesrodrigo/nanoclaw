@@ -1,0 +1,52 @@
+{
+  "mcpServers": {
+    "gmail": {
+      "command": "gmail-mcp",
+      "args": [],
+      "env": {}
+    },
+    "google-calendar": {
+      "command": "google-calendar-mcp",
+      "args": [],
+      "env": {
+        "GOOGLE_OAUTH_CREDENTIALS": "/home/node/.config/google-calendar-mcp/gcp-oauth.keys.json"
+      }
+    },
+    "google-drive": {
+      "command": "google-drive-mcp",
+      "args": [],
+      "env": {
+        "GOOGLE_DRIVE_OAUTH_CREDENTIALS": "/home/node/.config/google-drive-mcp/gcp-oauth.keys.json",
+        "GOOGLE_DRIVE_MCP_TOKEN_PATH": "/home/node/.config/google-drive-mcp/tokens.json"
+      },
+      "instructions": "When downloading or reading file content from Google Drive, always use a subagent (the Agent tool) for the actual download operations. The download_file_content and read_file_content tools return full file content (including base64-encoded binaries) inline, which accumulates in your session transcript and can cause API size limit errors.\n\nPattern:\n- Use search_files, list_recent_files, and get_file_metadata directly (lightweight, metadata only).\n- For download_file_content or read_file_content: spawn a subagent that downloads the file, extracts what you need, and returns only a text summary. The binary content stays in the subagent's context (discarded after) instead of yours.\n- This is especially critical when handling multiple files in a single session.\n\nGotcha: moveItem and deleteItem fail for pre-existing Drive files (permission error from app 627279937848). Only copyFile works for those. Files created in the current session can be moved/deleted normally."
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "env": {
+        "BRAVE_API_KEY": "BSAs6fHVOJS8fWZ8Cu1BXvghwSaWu3f"
+      }
+    }
+  },
+  "packages": {
+    "apt": [
+      "python3-numpy",
+      "python3-pandas",
+      "python3-matplotlib",
+      "python3-scipy",
+      "python3-bs4",
+      "python3-sklearn"
+    ],
+    "npm": []
+  },
+  "imageTag": "nanoclaw-agent-v2-9a8662aa:ag-1777000247524-9397mf",
+  "additionalMounts": [],
+  "skills": "all",
+  "groupName": "Claude",
+  "assistantName": "Claude",
+  "agentGroupId": "ag-1777000247524-9397mf"
+}

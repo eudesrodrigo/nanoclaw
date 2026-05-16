@@ -32,17 +32,6 @@ if [ "${INSTALL_CJK_FONTS:-false}" = "true" ]; then
     BUILD_ARGS+=(--build-arg INSTALL_CJK_FONTS=true)
 fi
 
-# ---- Stage http-clients Python package into build context --------------------
-HTTP_CLIENTS_SRC="${HTTP_CLIENTS_SRC:-$PROJECT_ROOT/../http-clients}"
-if [ -d "$HTTP_CLIENTS_SRC" ]; then
-    echo "Staging http-clients from $HTTP_CLIENTS_SRC"
-    rsync -a --exclude='.venv' --exclude='__pycache__' --exclude='.git' \
-        "$HTTP_CLIENTS_SRC/" "$SCRIPT_DIR/http-clients/"
-    trap 'rm -rf "$SCRIPT_DIR/http-clients"' EXIT
-else
-    echo "Warning: http-clients not found at $HTTP_CLIENTS_SRC — skipping"
-fi
-
 echo "Building NanoClaw agent container image..."
 echo "Image: ${IMAGE_NAME}:${TAG}"
 

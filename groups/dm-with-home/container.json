@@ -1,0 +1,54 @@
+{
+  "mcpServers": {
+    "gmail": {
+      "command": "gmail-mcp",
+      "args": [],
+      "env": {}
+    },
+    "google-calendar": {
+      "command": "google-calendar-mcp",
+      "args": [],
+      "env": {
+        "GOOGLE_OAUTH_CREDENTIALS": "/home/node/.config/google-calendar-mcp/gcp-oauth.keys.json"
+      }
+    },
+    "google-drive": {
+      "command": "pnpm",
+      "args": [
+        "dlx",
+        "@anthropic-ai/google-drive-mcp"
+      ],
+      "env": {}
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "env": {
+        "BRAVE_API_KEY": "BSAs6fHVOJS8fWZ8Cu1BXvghwSaWu3f"
+      }
+    }
+  },
+  "packages": {
+    "apt": [
+      "python3-numpy",
+      "python3-pandas",
+      "python3-matplotlib",
+      "python3-scipy",
+      "python3-bs4",
+      "python3-sklearn"
+    ],
+    "npm": []
+  },
+  "imageTag": "nanoclaw-agent-v2-9a8662aa:ag-1777176107194-emql84",
+  "additionalMounts": [],
+  "skills": "all",
+  "groupName": "Claude",
+  "assistantName": "Claude",
+  "agentGroupId": "ag-1777176107194-emql84",
+  "audioTranscription": {
+    "model": "gemini-2.5-flash"
+  }
+}
