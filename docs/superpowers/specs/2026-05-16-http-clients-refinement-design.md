@@ -24,10 +24,10 @@ Auto-composed as `.claude-fragments/module-http-clients.md` in every agent group
 **Content scope** (following the pattern of `core.instructions.md`, `scheduling.instructions.md`):
 
 - What the tool does: proxy to the `http-clients` CLI on the host
-- Input schema: `service` (required string), `command` (optional string), `args` (optional key-value object passed as CLI flags)
+- Input schema: `service` (optional string), `command` (optional string), `args` (optional key-value object passed as CLI flags)
 - Response format: `{status: "ok", data: ...}` on success, `{status: "error", code: "auth_required"|"cli_error", ...}` on failure
 - Security note: credentials live on the host — the container never sees them
-- Discovery: omit `command` to get the service's help output (available commands and flags)
+- Discovery: omit `command` to get the service's help output; omit both to list available services. Help text arrives as `{status: "error", code: "cli_error", message: "..."}` because Typer writes help to stderr.
 
 ### 2. Rewrite `SKILL.md` (container skill)
 
@@ -59,8 +59,6 @@ Make both `service` and `command` optional. Build the CLI args array from whiche
 Validation: at least one of `service` or `command` must be present, OR allow a fully empty call for top-level discovery. Since `http-clients` with no args just shows help, allowing it is safe.
 
 **Note on help output:** Typer writes help text to stderr with exit code 0. The host service currently treats empty stdout + non-empty stderr as a `cli_error` response. The agent receives the help text in the `message` field of the error response. The `instructions.md` and `SKILL.md` must document this explicitly so the agent knows to read the `message` field of error responses for discovery output, not treat it as a failure.
-
-**Top-level discovery:** To list all available services, the agent needs `http-clients --help` (no service). Since `service` is required, support a special value: when `service` is `"help"`, the host service spawns `http-clients --help` instead of `http-clients help`. This avoids the hack of passing `"--help"` as a service name. Alternatively, make `service` optional too — but that opens the door to empty spawns (`http-clients` with no args), which is fine since Typer shows help by default. Recommend making `service` optional for consistency with `command`.
 
 ### 4. Make `command` optional in MCP tool schema
 
@@ -96,7 +94,13 @@ The file retains: agent identity, browser credentials, and any other non-http-cl
 
 **File:** `src/http-clients-service.test.ts`
 
-Update the test that validates 400 for missing `command` — `command` is now optional, so the request `{service: "costco"}` should succeed (or at least not return 400 for missing fields). Add a test for service-only requests.
+Update existing tests and add new ones:
+
+- **Remove** the test that validates 400 for missing `command` — `command` is now optional.
+- **Add** test: empty body `{}` returns 200 with `cli_error` containing help text (top-level discovery).
+- **Add** test: service-only `{service: "costco"}` returns 200 with `cli_error` containing service help text.
+- **Keep** existing test: `{service, command}` returns expected output (current behavior unchanged).
+- **Keep** existing test: `{service, command, args}` passes flags correctly.
 
 ## What does NOT change
 
@@ -114,8 +118,8 @@ After implementation:
 1. Restart NanoClaw (`launchctl kickstart`)
 2. Confirm `module-http-clients.md` appears in `.claude-fragments/` for both dm-with-eudes and dm-with-home
 3. Confirm `http-clients` skill is symlinked in both groups' `.claude-shared/skills/`
-4. Test top-level discovery: `curl -X POST http://127.0.0.1:3002/call -H 'content-type: application/json' -d '{}'` — should return help text listing services
-5. Test service discovery: `curl -X POST http://127.0.0.1:3002/call -H 'content-type: application/json' -d '{"service":"costco"}'` — should return help text listing commands
+4. Test top-level discovery: `curl -X POST http://127.0.0.1:3002/call -H 'content-type: application/json' -d '{}'` — should return `{status: "error", code: "cli_error", message: "..."}` where `message` contains help text listing available services (Typer writes help to stderr)
+5. Test service discovery: `curl -X POST http://127.0.0.1:3002/call -H 'content-type: application/json' -d '{"service":"costco"}'` — should return `{status: "error", code: "cli_error", message: "..."}` where `message` contains help text listing commands for that service
 6. Test normal operation: `curl -X POST http://127.0.0.1:3002/call -H 'content-type: application/json' -d '{"service":"costco","command":"profiles"}'` — should return profiles (existing behavior unchanged)
 7. All host tests pass (`pnpm test`)
 8. Verify scheduled task cancelled: `sqlite3 data/v2-sessions/.../inbound.db "SELECT id, status FROM messages_in WHERE series_id = 'task-1777765347844-abf4sk'"` — all rows should be `completed`
