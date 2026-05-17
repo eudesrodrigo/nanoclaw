@@ -50,22 +50,22 @@ describe('http-clients-service', () => {
     expect(status).toBe(404);
   });
 
-  it('returns 400 when service is missing', async () => {
+  it('accepts empty body for top-level discovery', async () => {
     server = await startHttpClientsService(0);
     const port = (server.address() as { port: number }).port;
 
-    const { status, data } = await makeRequest(port, { command: 'receipts' });
-    expect(status).toBe(400);
-    expect(data.status).toBe('error');
+    const { status, data } = await makeRequest(port, {});
+    expect(status).toBe(200);
+    expect(data.status).toBeDefined();
   });
 
-  it('returns 400 when command is missing', async () => {
+  it('accepts service-only requests (discovery)', async () => {
     server = await startHttpClientsService(0);
     const port = (server.address() as { port: number }).port;
 
     const { status, data } = await makeRequest(port, { service: 'costco' });
-    expect(status).toBe(400);
-    expect(data.status).toBe('error');
+    expect(status).toBe(200);
+    expect(data.status).toBeDefined();
   });
 
   it('calls CLI and returns JSON output on success', async () => {

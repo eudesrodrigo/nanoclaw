@@ -30,12 +30,10 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
         }
 
         const { service, command, args } = body;
-        if (!service || !command) {
-          respond(res, 400, { status: 'error', message: 'Missing required fields: service, command' });
-          return;
-        }
 
-        const cliArgs = [service, command];
+        const cliArgs: string[] = [];
+        if (service) cliArgs.push(service);
+        if (command) cliArgs.push(command);
         if (args) {
           for (const [key, value] of Object.entries(args)) {
             cliArgs.push(`--${key}`, String(value));
