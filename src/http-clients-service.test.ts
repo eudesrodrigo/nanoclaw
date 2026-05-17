@@ -3,10 +3,7 @@ import http from 'http';
 
 import { startHttpClientsService } from './http-clients-service.js';
 
-function makeRequest(
-  port: number,
-  body: object,
-): Promise<{ status: number; data: Record<string, unknown> }> {
+function makeRequest(port: number, body: object): Promise<{ status: number; data: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
     const payload = JSON.stringify(body);
     const req = http.request(

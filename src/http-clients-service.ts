@@ -1,6 +1,7 @@
 import { createServer, Server } from 'http';
 import { spawn } from 'child_process';
 
+import { HTTP_CLIENTS_BIN } from './config.js';
 import { log } from './log.js';
 
 export function startHttpClientsService(port: number, host = '127.0.0.1'): Promise<Server> {
@@ -66,7 +67,7 @@ function respond(res: import('http').ServerResponse, statusCode: number, data: o
 
 function runCli(args: string[]): Promise<object> {
   return new Promise((resolve, reject) => {
-    const proc = spawn('http-clients', args, {
+    const proc = spawn(HTTP_CLIENTS_BIN, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 30_000,
     });
