@@ -56,7 +56,7 @@ Make both `service` and `command` optional. Build the CLI args array from whiche
 - `service` only: spawn `http-clients <service>` (shows service commands)
 - Both: spawn `http-clients <service> <command>` (current behavior)
 
-Validation: at least one of `service` or `command` must be present, OR allow a fully empty call for top-level discovery. Since `http-clients` with no args just shows help, allowing it is safe.
+No validation needed — all fields are optional. An empty call just shows help, which is safe.
 
 **Note on help output:** Typer writes help text to stderr with exit code 0. The host service currently treats empty stdout + non-empty stderr as a `cli_error` response. The agent receives the help text in the `message` field of the error response. The `instructions.md` and `SKILL.md` must document this explicitly so the agent knows to read the `message` field of error responses for discovery output, not treat it as a failure.
 
