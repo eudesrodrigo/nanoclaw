@@ -15,21 +15,21 @@ const httpClientsTool: McpToolDefinition = {
   tool: {
     name: 'http_clients',
     description:
-      'Call the http-clients service on the host for API access (Costco, Wealthsimple, etc). ' +
-      'Credentials are managed securely on the host — this tool never sees them. ' +
-      'Returns JSON from the CLI. On auth failure, returns {status:"error", code:"auth_required", flow:"token"|"otp"}.',
+      'Call the http-clients CLI on the host. Credentials are managed securely on the host — this tool never sees them. ' +
+      'Omit all args to list available services. Pass service only to list its commands. ' +
+      'Pass service + command to execute. Returns JSON; on auth failure returns {status:"error", code:"auth_required", flow:"token"|"otp"}.',
     inputSchema: {
       type: 'object',
       properties: {
-        service: { type: 'string', description: 'Service name (e.g. costco, wealthsimple)' },
-        command: { type: 'string', description: 'CLI command (e.g. receipts, positions, login, membership)' },
+        service: { type: 'string', description: 'Service name (e.g. costco, wealthsimple). Omit to list available services.' },
+        command: { type: 'string', description: 'CLI command (e.g. receipts, positions, login). Omit to list commands for the service.' },
         args: {
           type: 'object',
           description: 'Key-value pairs passed as CLI flags (e.g. {profile: "eudes", type: "warehouse"})',
           additionalProperties: { type: 'string' },
         },
       },
-      required: ['service', 'command'],
+      required: [],
     },
   },
   handler: async (params) => {
@@ -37,7 +37,7 @@ const httpClientsTool: McpToolDefinition = {
       return err('HTTP_CLIENTS_URL not configured — host service not available');
     }
 
-    const { service, command, args } = params as { service: string; command: string; args?: Record<string, string> };
+    const { service, command, args } = params as { service?: string; command?: string; args?: Record<string, string> };
 
     try {
       const response = await fetch(`${HTTP_CLIENTS_URL}/call`, {
