@@ -79,33 +79,52 @@ function runCli(args: string[]): Promise<object> {
     proc.on('close', (code) => {
       const out = Buffer.concat(stdout).toString().trim();
       const errOut = Buffer.concat(stderr).toString().trim();
-
-      if (code === 0 && out) {
-        try {
-          const data = JSON.parse(out);
-          resolve({ status: 'ok', data });
-        } catch {
-          resolve({ status: 'ok', data: out });
-        }
-      } else {
-        const isAuthError = errOut.includes('TokenNotFoundError') || errOut.includes('AuthenticationError');
-        const flow = errOut.includes('TokenNotFoundError') ? 'token' : 'otp';
-        if (isAuthError) {
-          resolve({
-            status: 'error',
-            code: 'auth_required',
-            flow,
-            message: errOut.split('\n')[0],
-          });
-        } else {
-          resolve({
-            status: 'error',
-            code: 'cli_error',
-            exitCode: code,
-            message: errOut || out || `CLI exited with code ${code}`,
-          });
-        }
-      }
+      resolve(classifyCliResult(code, out, errOut));
     });
   });
+}
+
+export function classifyCliResult(code: number | null, stdout: string, stderr: string): object {
+  if (code === 0 && stdout) {
+    try {
+      return { status: 'ok', data: JSON.parse(stdout) };
+    } catch {
+      return { status: 'ok', data: stdout };
+    }
+  }
+
+  // OTP-required is its own auth flow: the host has the credentials but needs a
+  // fresh one-time code from the user. The CLI emits `OTPRequired:<hint>` on
+  // stderr when run non-interactively.
+  const otpMatch = stderr.match(/OTPRequired:(.*)/);
+  if (otpMatch) {
+    return {
+      status: 'error',
+      code: 'auth_required',
+      flow: 'otp',
+      hint: otpMatch[1].trim(),
+      message: stderr.split('\n')[0],
+    };
+  }
+
+  // Transient = retryable (network, timeout, 5xx, rate limit). NOT an auth
+  // problem — the credentials are fine, so the agent must retry the original
+  // command, never start a re-auth/OTP flow.
+  if (stderr.includes('TransientError')) {
+    return { status: 'error', code: 'transient', message: stderr.split('\n')[0] };
+  }
+
+  if (stderr.includes('TokenNotFoundError')) {
+    return { status: 'error', code: 'auth_required', flow: 'token', message: stderr.split('\n')[0] };
+  }
+  if (stderr.includes('AuthenticationError')) {
+    return { status: 'error', code: 'auth_required', flow: 'otp', message: stderr.split('\n')[0] };
+  }
+
+  return {
+    status: 'error',
+    code: 'cli_error',
+    exitCode: code,
+    message: stderr || stdout || `CLI exited with code ${code}`,
+  };
 }

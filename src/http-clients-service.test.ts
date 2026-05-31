@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import http from 'http';
 
-import { startHttpClientsService } from './http-clients-service.js';
+import { startHttpClientsService, classifyCliResult } from './http-clients-service.js';
 
 function makeRequest(port: number, body: object): Promise<{ status: number; data: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
@@ -82,6 +82,58 @@ describe('http-clients-service', () => {
     // We verify the service handles both cases without crashing.
     expect(status).toBeGreaterThanOrEqual(200);
     expect(data.status).toBeDefined();
+  });
+
+  it('maps OTPRequired stderr to auth_required/flow:otp with hint', () => {
+    const result = classifyCliResult(2, '', 'OTPRequired: (phone ending in ...45)\nTraceback ...') as Record<
+      string,
+      unknown
+    >;
+    expect(result.status).toBe('error');
+    expect(result.code).toBe('auth_required');
+    expect(result.flow).toBe('otp');
+    expect(result.hint).toBe('(phone ending in ...45)');
+  });
+
+  it('maps TokenNotFoundError stderr to auth_required/flow:token', () => {
+    const result = classifyCliResult(1, '', 'TokenNotFoundError: no token for profile eudes') as Record<
+      string,
+      unknown
+    >;
+    expect(result.code).toBe('auth_required');
+    expect(result.flow).toBe('token');
+  });
+
+  it('maps AuthenticationError stderr to auth_required/flow:otp', () => {
+    const result = classifyCliResult(1, '', 'Authentication failed: AuthenticationError bad creds') as Record<
+      string,
+      unknown
+    >;
+    expect(result.code).toBe('auth_required');
+    expect(result.flow).toBe('otp');
+  });
+
+  it('maps TransientError stderr to a retryable transient code (not auth_required)', () => {
+    const result = classifyCliResult(
+      1,
+      '',
+      'TransientError: Refresh token grant failed (transient): timed out',
+    ) as Record<string, unknown>;
+    expect(result.status).toBe('error');
+    expect(result.code).toBe('transient');
+    expect(result.code).not.toBe('auth_required');
+  });
+
+  it('parses JSON stdout on success', () => {
+    const result = classifyCliResult(0, '{"a":1}', '') as Record<string, unknown>;
+    expect(result.status).toBe('ok');
+    expect(result.data).toEqual({ a: 1 });
+  });
+
+  it('returns cli_error for non-auth failures', () => {
+    const result = classifyCliResult(2, '', 'Usage: http-clients ...\nMissing command.') as Record<string, unknown>;
+    expect(result.status).toBe('error');
+    expect(result.code).toBe('cli_error');
   });
 
   it('returns 405 for non-POST methods', async () => {
