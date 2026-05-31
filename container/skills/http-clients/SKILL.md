@@ -22,6 +22,8 @@ Always discover before running. New services and commands appear automatically �
 
 Some services have multiple profiles (e.g. family members with separate accounts). Use `http_clients({ service: "<name>", command: "profiles" })` to list them. By default `--profile all` consolidates data from every profile — output is tagged with `[Name]` prefixes. Use `args: { profile: "<name>" }` to query a specific one.
 
+On a multi-profile read (`--profile all`), if some profiles fail the result is **partial**: `{ "results": { "<profile>": <data> }, "errors": { "<profile>": { "code": "...", "flow"?: "...", "hint"?: "...", "profile": "<profile>" } } }`. Deliver the data in `results` right away, then recover each entry in `errors` per its `code` (see Re-authentication / Error handling) — re-authenticate **only** the failed profiles, one at a time, addressing the right person by profile name. Never discard good data because another profile failed.
+
 ## Re-authentication
 
 Credentials (email, password, saved tokens) live on the **host**. This agent never sees them and never needs them.
