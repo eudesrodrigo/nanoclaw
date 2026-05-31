@@ -1,7 +1,8 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import http from 'http';
 
 import { startHttpClientsService, classifyCliResult } from './http-clients-service.js';
+import { log } from './log.js';
 
 function makeRequest(port: number, body: object): Promise<{ status: number; data: Record<string, unknown> }> {
   return new Promise((resolve, reject) => {
@@ -134,6 +135,24 @@ describe('http-clients-service', () => {
     const result = classifyCliResult(2, '', 'Usage: http-clients ...\nMissing command.') as Record<string, unknown>;
     expect(result.status).toBe('error');
     expect(result.code).toBe('cli_error');
+  });
+
+  it('logs every CLI call with service, command, classified code and duration', async () => {
+    const spy = vi.spyOn(log, 'info').mockImplementation(() => {});
+    server = await startHttpClientsService(0);
+    const port = (server.address() as { port: number }).port;
+
+    await makeRequest(port, { service: 'costco', command: 'receipts', args: { profile: 'eudes' } });
+
+    const call = spy.mock.calls.find((c) => c[0] === 'http-clients call');
+    expect(call).toBeDefined();
+    const meta = call![1] as Record<string, unknown>;
+    expect(meta.service).toBe('costco');
+    expect(meta.command).toBe('receipts');
+    expect(meta.profile).toBe('eudes');
+    expect(typeof meta.code).toBe('string');
+    expect(typeof meta.durationMs).toBe('number');
+    spy.mockRestore();
   });
 
   it('returns 405 for non-POST methods', async () => {

@@ -40,10 +40,26 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
           }
         }
 
+        const startedAt = Date.now();
         runCli(cliArgs)
-          .then((result) => respond(res, 200, result))
+          .then((result) => {
+            const code = (result as { code?: string; status?: string }).code ?? 'ok';
+            log.info('http-clients call', {
+              service: service ?? null,
+              command: command ?? null,
+              profile: args?.profile ?? null,
+              code,
+              durationMs: Date.now() - startedAt,
+            });
+            respond(res, 200, result);
+          })
           .catch((err) => {
-            log.error('http-clients-service CLI error', { err, service, command });
+            log.error('http-clients-service CLI error', {
+              err,
+              service,
+              command,
+              durationMs: Date.now() - startedAt,
+            });
             respond(res, 500, { status: 'error', message: err instanceof Error ? err.message : String(err) });
           });
       });
