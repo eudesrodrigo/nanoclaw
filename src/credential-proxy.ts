@@ -37,6 +37,10 @@ export function startCredentialProxy(port: number, host = '127.0.0.1'): Promise<
   const upstreamUrl = new URL(secrets.ANTHROPIC_BASE_URL || 'https://api.anthropic.com');
   const isHttps = upstreamUrl.protocol === 'https:';
   const makeRequest = isHttps ? httpsRequest : httpRequest;
+  // Honor a path prefix on the base URL (e.g. Kimi's /coding, Moonshot's
+  // /anthropic). The container only knows /v1/messages; without this the
+  // prefix is dropped and the upstream 404s. Empty for prefix-less hosts.
+  const basePath = upstreamUrl.pathname.replace(/\/+$/, '');
 
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -76,7 +80,7 @@ export function startCredentialProxy(port: number, host = '127.0.0.1'): Promise<
           {
             hostname: upstreamUrl.hostname,
             port: upstreamUrl.port || (isHttps ? 443 : 80),
-            path: req.url,
+            path: basePath + req.url,
             method: req.method,
             headers,
           } as RequestOptions,
