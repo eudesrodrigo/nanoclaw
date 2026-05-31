@@ -22,7 +22,7 @@ Discovery output arrives as `{status: "error", code: "cli_error", message: "..."
 
 - Success: `{status: "ok", data: ...}`
 - Auth required: `{status: "error", code: "auth_required", flow: "token"|"otp", message: "...", hint?: "..."}`
-- Transient: `{status: "error", code: "transient", message: "..."}` — a retryable network/timeout/5xx blip. The credentials are fine: **just retry the same command** (do not re-authenticate, do not ask for an OTP). If it still fails after a couple of retries, tell the user it's a temporary upstream issue.
+- Transient: `{status: "error", code: "transient", message: "..."}` — a retryable network/timeout/5xx error. The credentials are fine: **just retry the same command** (do not re-authenticate, do not ask for an OTP). If it still fails after a couple of retries, say plainly that the request didn't go through right now and include the actual `message`. Do not assert a cause you can't verify — you only know the call failed, not why.
 - CLI error: `{status: "error", code: "cli_error", exitCode: <number>, message: "..."}`
 
 ### Re-authentication

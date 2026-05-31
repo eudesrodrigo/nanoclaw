@@ -48,7 +48,7 @@ On any Costco `auth_required` (regardless of `flow`):
 ## Error handling
 
 - `auth_required` — follow re-authentication flow above
-- `transient` — a retryable network/timeout/5xx blip; credentials are fine. **Retry the same command** — do NOT re-authenticate or ask for an OTP. If it still fails after a couple of retries, tell the user it's a temporary upstream issue.
+- `transient` — a retryable network/timeout/5xx error; credentials are fine. **Retry the same command** — do NOT re-authenticate or ask for an OTP. If it still fails after a couple of retries, say plainly that the request didn't go through right now and include the actual `message`. Do NOT assert a cause you can't verify (e.g. "the provider is down") — you only know the call failed, not why.
 - `cli_error` with help text — normal discovery output, read `message` field
 - `cli_error` with other content — report the error message to the user
 - Network/fetch error — report that the host service is unreachable
