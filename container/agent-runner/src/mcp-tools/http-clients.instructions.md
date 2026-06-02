@@ -26,6 +26,24 @@ Discovery output arrives as `{status: "error", code: "cli_error", message: "..."
 - Partial (multi-profile reads): `{status: "ok", data: {results: {<profile>: <data>}, errors: {<profile>: {code, flow?, hint?, profile}}}}` — deliver `results` immediately, then recover each `errors` entry by its `code` for that profile only (one at a time). Don't drop good data because a sibling profile failed.
 - CLI error: `{status: "error", code: "cli_error", exitCode: <number>, message: "..."}`
 
+### Wealthsimple data (use `portfolio`)
+
+For account values, holdings, and returns, call `portfolio` — a single call returns the
+consolidated `total` plus every account with its live value, return, holdings, and a
+derived `cash` line. Prefer it over calling `accounts` + `positions` separately and
+consolidating by hand.
+
+- Values are **live** and **already in CAD** — even for USD securities, `market_value`,
+  `book_value`, and `unrealized_returns` come pre-converted. **Never do USD→CAD FX
+  conversion yourself.**
+- Position market value is `market_value` (the old `account_value` field is gone).
+- Returns come from the API: `simple_returns` (per account and on `total`) and
+  `unrealized_returns` (per position). `percentage_of_account` is provided too. Don't
+  recompute these.
+- Cash is a separate per-account field, not a position.
+- For a holdings-only view, `positions` works; consolidate by `security.symbol`.
+- `args: { profile: "all" }` consolidates across profiles (partial-result shape applies).
+
 ### Re-authentication
 
 Credentials live on the host — this agent never sees or needs them. On `{code: "auth_required"}`, **never** ask for an email/password and **never** shell out: call `login` for the service.

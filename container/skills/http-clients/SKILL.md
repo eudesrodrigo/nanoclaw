@@ -24,6 +24,19 @@ Some services have multiple profiles (e.g. family members with separate accounts
 
 On a multi-profile read (`--profile all`), if some profiles fail the result is **partial**: `{ "results": { "<profile>": <data> }, "errors": { "<profile>": { "code": "...", "flow"?: "...", "hint"?: "...", "profile": "<profile>" } } }`. Deliver the data in `results` right away, then recover each entry in `errors` per its `code` (see Re-authentication / Error handling) — re-authenticate **only** the failed profiles, one at a time, addressing the right person by profile name. Never discard good data because another profile failed.
 
+## Wealthsimple
+
+For account values, holdings, and returns, use the `portfolio` command — one call returns
+the consolidated total plus every account with live value, return, holdings, and derived
+cash. Prefer it over stitching `accounts` + `positions` by hand.
+
+- Values are **live** and **already in CAD** — even USD securities come pre-converted
+  (`market_value`, `book_value`, `unrealized_returns`). **Never convert USD→CAD yourself.**
+- Position value is `market_value` (the old `account_value` is gone).
+- Returns (`simple_returns`, `unrealized_returns`) and `percentage_of_account` come from
+  the API — don't recompute them. Cash is a separate per-account field.
+- For a holdings-only view use `positions`; consolidate by `security.symbol`.
+
 ## Re-authentication
 
 Credentials (email, password, saved tokens) live on the **host**. This agent never sees them and never needs them.
