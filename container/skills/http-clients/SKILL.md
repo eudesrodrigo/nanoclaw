@@ -20,22 +20,49 @@ Always discover before running. New services and commands appear automatically �
 
 ## Multi-profile
 
-Some services have multiple profiles (e.g. family members with separate accounts). Use `http_clients({ service: "<name>", command: "profiles" })` to list them. By default `--profile all` consolidates data from every profile — output is tagged with `[Name]` prefixes. Use `args: { profile: "<name>" }` to query a specific one.
+Some services have multiple profiles (e.g. family members with separate accounts). Use `http_clients({ service: "<name>", command: "profiles" })` to list them. `args: { profile: "all" }` runs across every profile — the output is a JSON object **keyed by profile name** (e.g. `{ "eudes": …, "magda": … }`), not tagged text. Use `args: { profile: "<name>" }` for one profile.
 
 On a multi-profile read (`--profile all`), if some profiles fail the result is **partial**: `{ "results": { "<profile>": <data> }, "errors": { "<profile>": { "code": "...", "flow"?: "...", "hint"?: "...", "profile": "<profile>" } } }`. Deliver the data in `results` right away, then recover each entry in `errors` per its `code` (see Re-authentication / Error handling) — re-authenticate **only** the failed profiles, one at a time, addressing the right person by profile name. Never discard good data because another profile failed.
 
 ## Wealthsimple
 
-For account values, holdings, and returns, use the `portfolio` command — one call returns
-the consolidated total plus every account with live value, return, holdings, and derived
-cash. Prefer it over stitching `accounts` + `positions` by hand.
+Use `portfolio` with `args: { profile: "all" }` — one call returns, per profile, the
+consolidated `total` plus every account with its live value, return, holdings, and a
+derived `cash` line. It's the right source for allocation, returns, and per-account
+breakdowns. (`positions` is holdings-only and excludes cash.)
 
-- Values are **live** and **already in CAD** — even USD securities come pre-converted
-  (`market_value`, `book_value`, `unrealized_returns`). **Never convert USD→CAD yourself.**
-- Position value is `market_value` (the old `account_value` is gone).
-- Returns (`simple_returns`, `unrealized_returns`) and `percentage_of_account` come from
-  the API — don't recompute them. Cash is a separate per-account field.
-- For a holdings-only view use `positions`; consolidate by `security.symbol`.
+**Always fetch fresh.** For any value / % / allocation / return question, call the API
+right then. **Never** reuse numbers from earlier in the conversation or from memory — the
+data moves and the user needs certainty.
+
+**The data:**
+
+- All money is **already in CAD**, even for USD securities (`market_value`, `book_value`,
+  `unrealized_returns`). **Never convert USD→CAD yourself.** `security.currency` is the
+  security's native currency (often `USD`) — **ignore it**; it does NOT mean the value is USD.
+- Position value is `market_value` (the old `account_value` is gone). Returns
+  (`simple_returns` per account/total, `unrealized_returns` per position) and
+  `percentage_of_account` come from the API — don't recompute them.
+- `simple_returns.rate` can be `null` (cash/save accounts) — handle gracefully.
+
+**Consolidating across profiles/accounts:** group `holdings[].market_value` by
+`security.symbol` and sum (already CAD); sum every account's `cash` into a "Caixa" line.
+The headline total is the API's `total.net_liquidation_value`. Carteira return is
+`net_liquidation_value − net_deposits` (includes realized + cash); the per-asset
+`unrealized_returns` sum is only the unrealized gain on current holdings — the two won't
+tie, so present the **carteira** figure as the official total.
+
+### Output format — never tables (they break on Telegram)
+
+One `•` bullet per asset; indented `–` sub-bullets for detail. Sort by value/return desc.
+
+- **Allocation by asset:** `**Alocação consolidada (Eudes + Magda)** — Total: $110.234`
+  then `• **TICKER** — $value (NN,N%)` per asset, a `• **Caixa** — …` line, and a
+  tech-concentration rollup.
+- **Total return:** headline `**Retorno total da carteira:** +$X (+Y%)`, then per asset
+  `• **TICKER** — +$ret` with a sub-bullet `  – +N% sobre custo · M% do lucro`.
+- **Per-account (sell decisions):** `• **TICKER** — $value` then a sub-bullet per account
+  `  – <Owner> <RRSP/TFSA/FHSA>: $value` (account type matters for tax).
 
 ## Re-authentication
 
@@ -72,4 +99,5 @@ On any Costco `auth_required` (regardless of `flow`):
 
 - Summarize results in natural language — don't dump raw JSON
 - Use the messaging format appropriate for the channel (Telegram markdown, Slack mrkdwn, etc.)
+- **Never use tables** — they render badly on Telegram. Use bullet points (`•`) with indented `–` sub-bullets for detail.
 - Be concise: totals, dates, and key details — skip noise

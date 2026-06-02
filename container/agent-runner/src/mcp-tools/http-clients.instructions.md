@@ -33,16 +33,23 @@ consolidated `total` plus every account with its live value, return, holdings, a
 derived `cash` line. Prefer it over calling `accounts` + `positions` separately and
 consolidating by hand.
 
+**Always fetch fresh** for any value / % / return question — never reuse numbers from
+earlier in the conversation or memory; the data moves and the user needs certainty.
+
 - Values are **live** and **already in CAD** — even for USD securities, `market_value`,
   `book_value`, and `unrealized_returns` come pre-converted. **Never do USD→CAD FX
-  conversion yourself.**
+  conversion yourself.** `security.currency` is the security's native currency (often
+  `USD`) — ignore it; it does NOT mean the value is in USD.
 - Position market value is `market_value` (the old `account_value` field is gone).
 - Returns come from the API: `simple_returns` (per account and on `total`) and
   `unrealized_returns` (per position). `percentage_of_account` is provided too. Don't
-  recompute these.
+  recompute these. `simple_returns.rate` can be `null` (cash/save accounts).
 - Cash is a separate per-account field, not a position.
 - For a holdings-only view, `positions` works; consolidate by `security.symbol`.
 - `args: { profile: "all" }` consolidates across profiles (partial-result shape applies).
+- Present results as bullet points (`•`) with indented `–` sub-bullets — **never tables**
+  (they break on Telegram). The `http-clients` skill has worked query recipes (allocation,
+  total return, per-account breakdown).
 
 ### Re-authentication
 
