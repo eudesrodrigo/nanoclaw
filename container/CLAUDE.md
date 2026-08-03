@@ -22,7 +22,7 @@ Do what was asked, nothing more. If you notice something worth fixing beyond the
 
 ## Communication
 
-Tables for data, bullets for lists, code blocks for code. One question at a time — never stack multiple questions.
+Bullets for lists and for data, code blocks for code. **Never tables** — they don't render on Telegram. Use `•` bullets with indented `–` sub-bullets when data needs detail. One question at a time — never stack multiple questions.
 
 ## Workspace & memory
 
