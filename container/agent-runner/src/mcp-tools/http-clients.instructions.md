@@ -10,13 +10,13 @@ All parameters are optional. Omit fields to discover what's available:
 - `http_clients({ service: "costco" })` — lists commands for that service
 - `http_clients({ service: "costco", command: "receipts" })` — executes the command
 
-Discovery output arrives as `{status: "error", code: "cli_error", message: "..."}` — read the `message` field for the help text. This is normal (the CLI writes help to stderr).
+Discovery output arrives as `{status: "error", code: "cli_error", message: "..."}` — read the `message` field for the help text. This is normal (the CLI writes its command list to stdout but exits non-zero, so it's classified as `cli_error` despite containing the useful output).
 
 ### Parameters
 
-- `service` (string, optional) — service name (e.g. `costco`, `wealthsimple`)
-- `command` (string, optional) — CLI command (e.g. `receipts`, `positions`, `login`, `profiles`)
-- `args` (object, optional) — key-value pairs passed as CLI flags (e.g. `{profile: "eudes", type: "warehouse"}`)
+- `service` (string, optional) — service name (e.g. `costco`, `wealthsimple-v2`)
+- `command` (string, optional) — CLI command (e.g. `receipts`, `fetch-identity-positions`, `login`, `profiles`)
+- `args` (object, optional) — key-value pairs passed as CLI flags. String/number → `--key value`; `true` → `--key`; `false` → `--no-key`; array → the flag repeated (`{ids: ["a","b"]}` → `--ids a --ids b`)
 
 ### Response format
 
@@ -26,30 +26,51 @@ Discovery output arrives as `{status: "error", code: "cli_error", message: "..."
 - Partial (multi-profile reads): `{status: "ok", data: {results: {<profile>: <data>}, errors: {<profile>: {code, flow?, hint?, profile}}}}` — deliver `results` immediately, then recover each `errors` entry by its `code` for that profile only (one at a time). Don't drop good data because a sibling profile failed.
 - CLI error: `{status: "error", code: "cli_error", exitCode: <number>, message: "..."}`
 
-### Wealthsimple data (use `portfolio`)
+### Wealthsimple (`wealthsimple-v2`)
 
-For account values, holdings, and returns, call `portfolio` — a single call returns the
-consolidated `total` plus every account with its live value, return, holdings, and a
-derived `cash` line. Prefer it over calling `accounts` + `positions` separately and
-consolidating by hand.
+26 commands, one per Wealthsimple GraphQL query, returned with no reshaping. There is no
+aggregated "portfolio" command — a question about value, allocation or return is answered
+by combining calls, and what belongs in the answer is decided in the conversation.
 
 **Always fetch fresh** for any value / % / return question — never reuse numbers from
-earlier in the conversation or memory; the data moves and the user needs certainty.
+earlier in the conversation or from memory; the data moves and the user needs certainty.
 
-- Values are **live** and **already in CAD** — even for USD securities, `market_value`,
-  `book_value`, and `unrealized_returns` come pre-converted. **Never do USD→CAD FX
-  conversion yourself.** `security.currency` is the security's native currency (often
-  `USD`) — ignore it; it does NOT mean the value is in USD.
-- Position market value is `market_value` (the old `account_value` field is gone).
-- Returns come from the API: `simple_returns` (per account and on `total`) and
-  `unrealized_returns` (per position). `percentage_of_account` is provided too. Don't
-  recompute these. `simple_returns.rate` can be `null` (cash/save accounts).
-- Cash is a separate per-account field, not a position.
-- For a holdings-only view, `positions` works; consolidate by `security.symbol`.
-- `args: { profile: "all" }` consolidates across profiles (partial-result shape applies).
-- Present results as bullet points (`•`) with indented `–` sub-bullets — **never tables**
-  (they break on Telegram). The `http-clients` skill has worked query recipes (allocation,
-  total return, per-account breakdown).
+Don't guess command names. Omit `command` for the full list grouped by domain; pass
+`args: { help: true }` for one command's options and their types — that route returns
+`{status: "ok", data: "<help text>"}`, not the `cli_error` envelope the listings above use.
+
+**Positions** — `fetch-identity-positions`
+- Symbol is at `security.stock.symbol`, **not** `security.symbol`.
+- `security.currency` is the security's native currency (often `USD`); the amount in
+  `total_value` is already CAD. **Never convert.**
+- Value is `total_value.amount`, a decimal **string**.
+- `percentage_of_account` is a percentage of its own account, not of the portfolio.
+- `accounts[].id` links a position to its account. Closed accounts return no positions.
+
+**Accounts** — `fetch-all-accounts`
+- Large (tens of KB) and has no server-side filter.
+- Closed accounts are included and report a net liquidation value of `0`. Open accounts
+  can also sit at `0`, so the value never identifies a closed account — only `status` /
+  `is_open` does.
+
+**Balance, deposits, return per account** — `fetch-account-combined-financials`, `ids` as an array
+- `net_liquidation_value_v2.amount`, `net_deposits_v2.amount`, `simple_returns.rate`.
+- `simple_returns.rate` can be `null` (cash/save accounts).
+- **Returns `0` for credit-card accounts.** A portfolio line of credit reports a negative
+  value.
+
+**Credit card** — `fetch-credit-card-account` with `id`
+- The only correct source for a card: `balance.current`, `balance.outstanding`,
+  `balance.available_credit_limit`, `balance.pending`.
+
+**Cash** is not a position: per account it is `net_liquidation_value_v2` minus the sum of
+that account's position `total_value`.
+
+Output is always keyed by profile, even for a single profile: `{ "eudes": … }`.
+`args: { profile: "all" }` covers every profile (partial-result shape applies).
+
+Present results as bullet points (`•`) with indented `–` sub-bullets — **never tables**
+(they break on Telegram). The `http-clients` skill has the agreed formats.
 
 ### Re-authentication
 

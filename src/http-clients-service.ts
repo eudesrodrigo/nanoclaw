@@ -21,7 +21,7 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
       const chunks: Buffer[] = [];
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
-        let body: { service?: string; command?: string; args?: Record<string, string> };
+        let body: { service?: string; command?: string; args?: Record<string, CliArgValue> };
         try {
           body = JSON.parse(Buffer.concat(chunks).toString());
         } catch {
@@ -31,14 +31,7 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
 
         const { service, command, args } = body;
 
-        const cliArgs: string[] = [];
-        if (service) cliArgs.push(service);
-        if (command) cliArgs.push(command);
-        if (args) {
-          for (const [key, value] of Object.entries(args)) {
-            cliArgs.push(`--${key}`, String(value));
-          }
-        }
+        const cliArgs = buildCliArgs(service, command, args);
 
         const startedAt = Date.now();
         runCli(cliArgs)
@@ -79,11 +72,45 @@ function respond(res: import('http').ServerResponse, statusCode: number, data: o
   res.end(body);
 }
 
+export type CliArgValue = string | number | boolean | string[];
+
+export const CLI_TIMEOUT_MS = 60_000;
+
+export function cliEnv(): NodeJS.ProcessEnv {
+  // Rich wraps to 80 columns when COLUMNS is unset, shredding the help
+  // output the agent uses to discover commands. Widen it.
+  return { ...process.env, COLUMNS: '200' };
+}
+
+export function buildCliArgs(service?: string, command?: string, args?: Record<string, CliArgValue>): string[] {
+  const cliArgs: string[] = [];
+  if (service) cliArgs.push(service);
+  if (command) cliArgs.push(command);
+  if (!args) return cliArgs;
+
+  for (const [key, value] of Object.entries(args)) {
+    if (Array.isArray(value)) {
+      // Typer collects a `list[str]` option by repeating the flag —
+      // `--ids A --ids B`. A comma-joined single value is a different and
+      // wrong thing to the API on the far side.
+      for (const item of value) cliArgs.push(`--${key}`, String(item));
+    } else if (typeof value === 'boolean') {
+      // Typer renders a `bool` option as a `--flag / --no-flag` pair that
+      // accepts no value, so the value has to live in the flag name.
+      cliArgs.push(value ? `--${key}` : `--no-${key}`);
+    } else {
+      cliArgs.push(`--${key}`, String(value));
+    }
+  }
+  return cliArgs;
+}
+
 function runCli(args: string[]): Promise<object> {
   return new Promise((resolve, reject) => {
     const proc = spawn(HTTP_CLIENTS_BIN, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
-      timeout: 30_000,
+      timeout: CLI_TIMEOUT_MS,
+      env: cliEnv(),
     });
 
     const stdout: Buffer[] = [];
@@ -141,6 +168,16 @@ export function classifyCliResult(code: number | null, stdout: string, stderr: s
     status: 'error',
     code: 'cli_error',
     exitCode: code,
-    message: stderr || stdout || `CLI exited with code ${code}`,
+    message: mergeStreams(stdout, stderr) || `CLI exited with code ${code}`,
   };
+}
+
+function mergeStreams(stdout: string, stderr: string): string {
+  // This CLI puts its command list on stdout and its errors on stderr, never
+  // both at once, so `stderr || stdout` already surfaced the discovery
+  // list. This function is defensive against a future CLI that does write
+  // to both streams on the same failure — stdout leads because it is the
+  // useful half.
+  if (stdout && stderr) return `${stdout}\n\n${stderr}`;
+  return stderr || stdout;
 }

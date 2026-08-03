@@ -11,6 +11,8 @@ function err(text: string) {
   return { content: [{ type: 'text' as const, text: `Error: ${text}` }], isError: true };
 }
 
+type CliArgValue = string | number | boolean | string[];
+
 const httpClientsTool: McpToolDefinition = {
   tool: {
     name: 'http_clients',
@@ -21,12 +23,26 @@ const httpClientsTool: McpToolDefinition = {
     inputSchema: {
       type: 'object',
       properties: {
-        service: { type: 'string', description: 'Service name (e.g. costco, wealthsimple). Omit to list available services.' },
-        command: { type: 'string', description: 'CLI command (e.g. receipts, positions, login). Omit to list commands for the service.' },
+        service: {
+          type: 'string',
+          description: 'Service name (e.g. costco, wealthsimple-v2). Omit to list available services.',
+        },
+        command: {
+          type: 'string',
+          description: 'CLI command (e.g. receipts, fetch-identity-positions, login). Omit to list the service\'s commands.',
+        },
         args: {
           type: 'object',
-          description: 'Key-value pairs passed as CLI flags (e.g. {profile: "eudes", type: "warehouse"})',
-          additionalProperties: { type: 'string' },
+          description:
+            'Key-value pairs passed as CLI flags. String or number becomes "--key value"; true becomes "--key"; false becomes "--no-key"; an array repeats the flag once per item ("--ids A --ids B"). Pass {help: true} for a command\'s own help.',
+          additionalProperties: {
+            anyOf: [
+              { type: 'string' },
+              { type: 'number' },
+              { type: 'boolean' },
+              { type: 'array', items: { type: 'string' } },
+            ],
+          },
         },
       },
       required: [],
@@ -37,7 +53,11 @@ const httpClientsTool: McpToolDefinition = {
       return err('HTTP_CLIENTS_URL not configured — host service not available');
     }
 
-    const { service, command, args } = params as { service?: string; command?: string; args?: Record<string, string> };
+    const { service, command, args } = params as {
+      service?: string;
+      command?: string;
+      args?: Record<string, CliArgValue>;
+    };
 
     try {
       const response = await fetch(`${HTTP_CLIENTS_URL}/call`, {

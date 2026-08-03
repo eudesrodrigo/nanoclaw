@@ -1,7 +1,13 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import http from 'http';
 
-import { startHttpClientsService, classifyCliResult } from './http-clients-service.js';
+import {
+  startHttpClientsService,
+  classifyCliResult,
+  buildCliArgs,
+  cliEnv,
+  CLI_TIMEOUT_MS,
+} from './http-clients-service.js';
 import { log } from './log.js';
 
 function makeRequest(port: number, body: object): Promise<{ status: number; data: Record<string, unknown> }> {
@@ -137,6 +143,26 @@ describe('http-clients-service', () => {
     expect(result.code).toBe('cli_error');
   });
 
+  it('keeps both streams when a failing CLI writes to both', () => {
+    const result = classifyCliResult(2, 'Commands:\n  fetch-identity-positions', 'Missing command.') as Record<
+      string,
+      unknown
+    >;
+    expect(result.code).toBe('cli_error');
+    expect(result.message).toContain('fetch-identity-positions');
+    expect(result.message).toContain('Missing command.');
+  });
+
+  it('puts stdout before stderr so the command list leads', () => {
+    const result = classifyCliResult(2, 'THE-LIST', 'THE-ERROR') as Record<string, unknown>;
+    expect(result.message).toBe('THE-LIST\n\nTHE-ERROR');
+  });
+
+  it('still returns stderr alone when the CLI wrote no stdout', () => {
+    const result = classifyCliResult(1, '', 'Error: missing required input: account id') as Record<string, unknown>;
+    expect(result.message).toBe('Error: missing required input: account id');
+  });
+
   it('logs every CLI call with service, command, classified code and duration', async () => {
     const spy = vi.spyOn(log, 'info').mockImplementation(() => {});
     server = await startHttpClientsService(0);
@@ -168,5 +194,88 @@ describe('http-clients-service', () => {
       req.end();
     });
     expect(status).toBe(405);
+  });
+
+  it('renders service and command as positional args', () => {
+    expect(buildCliArgs('wealthsimple-v2', 'profiles')).toEqual(['wealthsimple-v2', 'profiles']);
+  });
+
+  it('omits missing service and command', () => {
+    expect(buildCliArgs(undefined, undefined, {})).toEqual([]);
+  });
+
+  it('renders string and number values as --key value', () => {
+    expect(buildCliArgs('wealthsimple-v2', 'fetch-contribution-ytd', { profile: 'eudes', 'tax-year': 2026 })).toEqual([
+      'wealthsimple-v2',
+      'fetch-contribution-ytd',
+      '--profile',
+      'eudes',
+      '--tax-year',
+      '2026',
+    ]);
+  });
+
+  it('repeats the flag once per array item (Typer list options)', () => {
+    expect(buildCliArgs('wealthsimple-v2', 'fetch-account-combined-financials', { ids: ['tfsa-a', 'rrsp-b'] })).toEqual(
+      ['wealthsimple-v2', 'fetch-account-combined-financials', '--ids', 'tfsa-a', '--ids', 'rrsp-b'],
+    );
+  });
+
+  it('renders an empty array as no flag at all', () => {
+    expect(buildCliArgs('wealthsimple-v2', 'fetch-accounts', { ids: [] })).toEqual([
+      'wealthsimple-v2',
+      'fetch-accounts',
+    ]);
+  });
+
+  it('renders boolean true as a bare flag and false as --no-flag', () => {
+    expect(buildCliArgs('wealthsimple-v2', 'fetch-identity-positions', { aggregated: true })).toEqual([
+      'wealthsimple-v2',
+      'fetch-identity-positions',
+      '--aggregated',
+    ]);
+    expect(buildCliArgs('wealthsimple-v2', 'fetch-identity-positions', { 'include-security': false })).toEqual([
+      'wealthsimple-v2',
+      'fetch-identity-positions',
+      '--no-include-security',
+    ]);
+  });
+
+  it('mixes every value type in one call', () => {
+    expect(
+      buildCliArgs('wealthsimple-v2', 'fetch-identity-positions', {
+        profile: 'eudes',
+        first: 100,
+        'account-ids': ['tfsa-a'],
+        aggregated: true,
+      }),
+    ).toEqual([
+      'wealthsimple-v2',
+      'fetch-identity-positions',
+      '--profile',
+      'eudes',
+      '--first',
+      '100',
+      '--account-ids',
+      'tfsa-a',
+      '--aggregated',
+    ]);
+  });
+
+  it('pins COLUMNS so Rich does not wrap help to 80 characters', () => {
+    expect(cliEnv().COLUMNS).toBe('200');
+  });
+
+  it('passes the parent environment through to the CLI', () => {
+    process.env.NANOCLAW_TEST_PASSTHROUGH = 'yes';
+    try {
+      expect(cliEnv().NANOCLAW_TEST_PASSTHROUGH).toBe('yes');
+    } finally {
+      delete process.env.NANOCLAW_TEST_PASSTHROUGH;
+    }
+  });
+
+  it('allows a paginated multi-profile read to run past 30 seconds', () => {
+    expect(CLI_TIMEOUT_MS).toBe(60_000);
   });
 });

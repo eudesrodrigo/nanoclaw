@@ -14,7 +14,7 @@ MCP tool for querying personal service accounts via the host. Services and comma
 2. `http_clients({ service: "<name>" })` — list commands for a service
 3. `http_clients({ service: "<name>", command: "<cmd>" })` — execute a command
 
-Discovery output arrives in `{status: "error", code: "cli_error", message: "..."}` — read the `message` field for help text. This is expected behavior, not an error.
+Discovery output arrives in `{status: "error", code: "cli_error", message: "..."}` — read the `message` field for help text. This is expected: the CLI writes its command list to stdout but exits non-zero, so it's classified as `cli_error` despite containing the useful output.
 
 Always discover before running. New services and commands appear automatically — don't hardcode anything.
 
@@ -26,43 +26,72 @@ On a multi-profile read (`--profile all`), if some profiles fail the result is *
 
 ## Wealthsimple
 
-Use `portfolio` with `args: { profile: "all" }` — one call returns, per profile, the
-consolidated `total` plus every account with its live value, return, holdings, and a
-derived `cash` line. It's the right source for allocation, returns, and per-account
-breakdowns. (`positions` is holdings-only and excludes cash.)
+The service is `wealthsimple-v2`: 26 commands, one per Wealthsimple GraphQL query,
+returned with no reshaping. There is no single command that returns "the portfolio".
+Value, allocation and return questions are answered by combining calls — and what belongs
+in the answer (which accounts, whether debt is netted out, what counts as "the total") is
+decided with the user in the conversation, not fixed here.
 
 **Always fetch fresh.** For any value / % / allocation / return question, call the API
 right then. **Never** reuse numbers from earlier in the conversation or from memory — the
 data moves and the user needs certainty.
 
-**The data:**
+### Finding commands
 
-- All money is **already in CAD**, even for USD securities (`market_value`, `book_value`,
-  `unrealized_returns`). **Never convert USD→CAD yourself.** `security.currency` is the
-  security's native currency (often `USD`) — **ignore it**; it does NOT mean the value is USD.
-- Position value is `market_value` (the old `account_value` is gone). Returns
-  (`simple_returns` per account/total, `unrealized_returns` per position) and
-  `percentage_of_account` come from the API — don't recompute them.
-- `simple_returns.rate` can be `null` (cash/save accounts) — handle gracefully.
+Don't guess command names or options.
 
-**Consolidating across profiles/accounts:** group `holdings[].market_value` by
-`security.symbol` and sum (already CAD); sum every account's `cash` into a "Caixa" line.
-The headline total is the API's `total.net_liquidation_value`. Carteira return is
-`net_liquidation_value − net_deposits` (includes realized + cash); the per-asset
-`unrealized_returns` sum is only the unrealized gain on current holdings — the two won't
-tie, so present the **carteira** figure as the official total.
+- `http_clients({ service: "wealthsimple-v2" })` — every command, grouped by domain.
+- `http_clients({ service: "wealthsimple-v2", command: "<cmd>", args: { help: true } })` —
+  one command's options and their types. Unlike the listings above, this route returns
+  `{status: "ok", data: "<help text>"}` — read `data`, not `message`.
+
+Arrays, booleans and numbers pass through: `args: { ids: ["tfsa-a", "rrsp-b"] }` becomes
+`--ids tfsa-a --ids rrsp-b`, `{ aggregated: true }` becomes `--aggregated`, and
+`{ "include-security": false }` becomes `--no-include-security`.
+
+### Where the data lives
+
+- **Positions (holdings)** — `fetch-identity-positions`. One call per profile.
+- **Account list** — `fetch-all-accounts`. No arguments needed.
+- **Balance, net deposits, return per account** — `fetch-account-combined-financials`,
+  with `ids` as an array of account ids.
+- **Credit card** — `fetch-credit-card-account`, with `id`.
+
+### Traps, all measured against the live API
+
+- **Symbol is `security.stock.symbol`**, not `security.symbol`.
+- **All amounts are already CAD.** `security.currency` is the security's native currency
+  and commonly reads `USD` on a position whose `total_value.currency` reads `CAD`.
+  **Never apply an FX conversion.**
+- **Position value is `total_value.amount`** — a decimal string, not a number.
+- **`percentage_of_account` is a percentage of its own account**, not of the portfolio. A
+  position that is an account's only holding reads `100`.
+- **Closed accounts are in the account list and report a net liquidation value of `0`.**
+  Open accounts can also sit at `0`, so the value never identifies a closed account — only
+  `status` / `is_open` does. Positions are already clean: closed accounts return none.
+- **`fetch-account-combined-financials` returns `0` for a credit card.** The real numbers
+  are in `fetch-credit-card-account`: `balance.current`, `balance.outstanding`,
+  `balance.available_credit_limit`, `balance.pending`. This exact silent zero is why the
+  previous client was retired.
+- **A portfolio line of credit reports a negative net liquidation value.**
+- **`simple_returns.rate` can be `null`** (cash/save accounts).
+- **Cash is not a position.** Per account it is `net_liquidation_value_v2` minus the sum
+  of that account's position `total_value`.
+- **Output is always keyed by profile**, even for a single profile: `{ "eudes": … }`.
 
 ### Output format — never tables (they break on Telegram)
 
-One `•` bullet per asset; indented `–` sub-bullets for detail. Sort by value/return desc.
+One `•` bullet per line; indented `–` sub-bullets for detail. Sort by value/return desc.
+These fix the shape so it is recognisable at a glance — they do not decide what goes in.
 
-- **Allocation by asset:** `**Alocação consolidada (Eudes + Magda)** — Total: $110.234`
-  then `• **TICKER** — $value (NN,N%)` per asset, a `• **Caixa** — …` line, and a
-  tech-concentration rollup.
-- **Total return:** headline `**Retorno total da carteira:** +$X (+Y%)`, then per asset
-  `• **TICKER** — +$ret` with a sub-bullet `  – +N% sobre custo · M% do lucro`.
-- **Per-account (sell decisions):** `• **TICKER** — $value` then a sub-bullet per account
+- **By asset:** `**Alocação consolidada (Eudes + Magda)** — Total: $X.XXX` then
+  `• **TICKER** — $value (NN,N%)` per asset.
+- **Returns:** headline `**Retorno total:** +$XXX (+N%)`, then per asset
+  `• **TICKER** — +$ret` with a sub-bullet `  – +N% sobre custo`.
+- **Per-account:** `• **TICKER** — $value` then a sub-bullet per account
   `  – <Owner> <RRSP/TFSA/FHSA>: $value` (account type matters for tax).
+- **Debt:** `• **Cartão** — $XX,XX devidos · limite disponível $X.XXX,XX` and
+  `• **Linha de crédito** — -$X.XXX,XX`.
 
 ## Re-authentication
 
@@ -74,6 +103,9 @@ Credentials (email, password, saved tokens) live on the **host**. This agent nev
 When any call returns `{status: "error", code: "auth_required"}`, recover by calling `login` for that service — do not give up and do not ask for credentials:
 
 **Wealthsimple (and any OTP-based service):**
+
+`login` and `profiles` are shared with the older `wealthsimple` client — same credentials record, so authenticating through either covers both.
+
 1. Call `http_clients({ service: "<name>", command: "login", args: { profile: "<profile>" } })`.
    - `{status: "ok"}` → re-authenticated. Retry the original call.
    - `{code: "auth_required", flow: "otp", hint}` → a one-time code is needed (the host has the password; only the OTP is missing).
