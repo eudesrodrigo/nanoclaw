@@ -34,7 +34,7 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
         const cliArgs = buildCliArgs(service, command, args);
 
         const startedAt = Date.now();
-        runCli(cliArgs)
+        runCli(cliArgs, !command)
           .then((result) => {
             const code = (result as { code?: string; status?: string }).code ?? 'ok';
             log.info('http-clients call', {
@@ -105,7 +105,7 @@ export function buildCliArgs(service?: string, command?: string, args?: Record<s
   return cliArgs;
 }
 
-function runCli(args: string[]): Promise<object> {
+function runCli(args: string[], isListing = false): Promise<object> {
   return new Promise((resolve, reject) => {
     const proc = spawn(HTTP_CLIENTS_BIN, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -122,12 +122,26 @@ function runCli(args: string[]): Promise<object> {
     proc.on('close', (code) => {
       const out = Buffer.concat(stdout).toString().trim();
       const errOut = Buffer.concat(stderr).toString().trim();
-      resolve(classifyCliResult(code, out, errOut));
+      resolve(classifyCliResult(code, out, errOut, isListing));
     });
   });
 }
 
-export function classifyCliResult(code: number | null, stdout: string, stderr: string): object {
+export function classifyCliResult(
+  code: number | null,
+  stdout: string,
+  stderr: string,
+  isListing = false,
+): object {
+  // A caller that names no command is asking for a listing. Typer prints the
+  // list to stdout and exits 2, so classifying by exit code alone reported the
+  // requested result as a failure — and an agent that skips an `error` envelope
+  // skips the command names with it. Measured in production: the agent called
+  // discovery, ignored the 26 KB it got back, and guessed 35 command names.
+  if (isListing && stdout) {
+    return { status: 'ok', data: stdout };
+  }
+
   if (code === 0 && stdout) {
     try {
       return { status: 'ok', data: JSON.parse(stdout) };

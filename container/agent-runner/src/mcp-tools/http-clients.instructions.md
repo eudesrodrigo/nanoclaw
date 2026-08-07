@@ -10,7 +10,7 @@ All parameters are optional. Omit fields to discover what's available:
 - `http_clients({ service: "costco" })` — lists commands for that service
 - `http_clients({ service: "costco", command: "receipts" })` — executes the command
 
-Discovery output arrives as `{status: "error", code: "cli_error", message: "..."}` — read the `message` field for the help text. This is normal (the CLI writes its command list to stdout but exits non-zero, so it's classified as `cli_error` despite containing the useful output).
+Discovery returns `{status: "ok", data: "<listing>"}` — the listing is plain text, not JSON, and it is the answer to the question you asked. Read it and pick the command from it. Never guess a command name: every name in the listing is real, and no name outside it exists.
 
 ### Parameters
 
@@ -35,9 +35,11 @@ by combining calls, and what belongs in the answer is decided in the conversatio
 **Always fetch fresh** for any value / % / return question — never reuse numbers from
 earlier in the conversation or from memory; the data moves and the user needs certainty.
 
-Don't guess command names. Omit `command` for the full list grouped by domain; pass
-`args: { help: true }` for one command's options and their types — that route returns
-`{status: "ok", data: "<help text>"}`, not the `cli_error` envelope the listings above use.
+Don't guess command names — a plausible-sounding name that isn't in the listing does not
+exist, and trying variations of it just burns turns. Omit `command` for the full list
+grouped by domain; pass `args: { help: true }` for one command's options and their types.
+Both return `{status: "ok", data: "<text>"}`. If a command call fails with `cli_error`,
+re-read the listing rather than reaching for a synonym.
 
 **Positions** — `fetch-identity-positions`
 - Symbol is at `security.stock.symbol`, **not** `security.symbol`.

@@ -143,6 +143,29 @@ describe('http-clients-service', () => {
     expect(result.code).toBe('cli_error');
   });
 
+  it('reports a command listing as ok, not as an error', () => {
+    // Typer exits 2 when a subcommand group is invoked with no command, but the
+    // command list it prints is the requested result, not a failure. Returning
+    // it under `status: "error"` invited the agent to skip 26 KB of exactly the
+    // names it then spent 35 calls guessing at.
+    const result = classifyCliResult(2, 'Commands:\n  fetch-identity-positions', '', true) as Record<string, unknown>;
+    expect(result.status).toBe('ok');
+    expect(result.data).toContain('fetch-identity-positions');
+    expect(result.code).toBeUndefined();
+  });
+
+  it('still reports a listing request that produced no output as an error', () => {
+    const result = classifyCliResult(2, '', 'No such service: nope', true) as Record<string, unknown>;
+    expect(result.status).toBe('error');
+    expect(result.code).toBe('cli_error');
+  });
+
+  it('leaves a failing command call an error even when it wrote to stdout', () => {
+    const result = classifyCliResult(2, 'Usage: ...', 'No such option: --nope', false) as Record<string, unknown>;
+    expect(result.status).toBe('error');
+    expect(result.code).toBe('cli_error');
+  });
+
   it('keeps both streams when a failing CLI writes to both', () => {
     const result = classifyCliResult(2, 'Commands:\n  fetch-identity-positions', 'Missing command.') as Record<
       string,

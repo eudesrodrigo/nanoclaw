@@ -14,7 +14,7 @@ MCP tool for querying personal service accounts via the host. Services and comma
 2. `http_clients({ service: "<name>" })` — list commands for a service
 3. `http_clients({ service: "<name>", command: "<cmd>" })` — execute a command
 
-Discovery output arrives in `{status: "error", code: "cli_error", message: "..."}` — read the `message` field for help text. This is expected: the CLI writes its command list to stdout but exits non-zero, so it's classified as `cli_error` despite containing the useful output.
+Discovery returns `{status: "ok", data: "<listing>"}` — plain text, not JSON. It is the answer to the question you asked: read it and pick the command from it.
 
 Always discover before running. New services and commands appear automatically — don't hardcode anything.
 
@@ -38,12 +38,20 @@ data moves and the user needs certainty.
 
 ### Finding commands
 
-Don't guess command names or options.
+Don't guess command names or options. The command surface grows — it went from 26 to 89
+commands in three days — so a name that sounds right may be new, renamed, or may never
+have existed. The listing is the only authority.
 
 - `http_clients({ service: "wealthsimple-v2" })` — every command, grouped by domain.
 - `http_clients({ service: "wealthsimple-v2", command: "<cmd>", args: { help: true } })` —
-  one command's options and their types. Unlike the listings above, this route returns
-  `{status: "ok", data: "<help text>"}` — read `data`, not `message`.
+  one command's options and their types.
+
+Both return `{status: "ok", data: "<text>"}` — plain text, read `data`.
+
+**When a command call returns `cli_error`, re-read the listing.** Do not try a synonym.
+Guessing variations (`fetch-credit-card-transactions`, `credit-card-activity`,
+`cc-transactions`…) has cost 35 failed calls in one session; the real name
+(`fetch-credit-card-activities`) was in the listing the whole time.
 
 Arrays, booleans and numbers pass through: `args: { ids: ["tfsa-a", "rrsp-b"] }` becomes
 `--ids tfsa-a --ids rrsp-b`, `{ aggregated: true }` becomes `--aggregated`, and
@@ -123,8 +131,10 @@ On any Costco `auth_required` (regardless of `flow`):
 
 - `auth_required` — follow re-authentication flow above
 - `transient` — a retryable network/timeout/5xx error; credentials are fine. **Retry the same command** — do NOT re-authenticate or ask for an OTP. If it still fails after a couple of retries, say plainly that the request didn't go through right now and include the actual `message`. Do NOT assert a cause you can't verify (e.g. "the provider is down") — you only know the call failed, not why.
-- `cli_error` with help text — normal discovery output, read `message` field
-- `cli_error` with other content — report the error message to the user
+- `cli_error` — a real failure: a command name that doesn't exist, a missing or misspelled
+  option, or a bad value. Re-read the listing or that command's `help: true` output to find
+  the right name and options. Never retry with a guessed synonym. If the listing shows you
+  were already correct, report the error message to the user.
 - Network/fetch error — report that the host service is unreachable
 
 ## Output
