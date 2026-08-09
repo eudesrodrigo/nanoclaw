@@ -91,6 +91,43 @@ describe('http-clients-service', () => {
     expect(data.status).toBeDefined();
   });
 
+  it('projects a successful response and marks it', async () => {
+    server = await startHttpClientsService(0);
+    const port = (server.address() as { port: number }).port;
+
+    const { data } = await makeRequest(port, {
+      service: 'wealthsimple',
+      command: 'fetch-identity-positions',
+      args: { profile: 'eudes' },
+    });
+
+    // These two tests exercise the live projection path. They require a host
+    // with authenticated Wealthsimple credentials. Never soft-pass: an
+    // unauthenticated host must break loudly, not report green.
+    expect(data.status, `live Wealthsimple credentials required — got ${JSON.stringify(data)}`).toBe('ok');
+    expect(data.projected).toBe('wealthsimple/fetch-identity-positions');
+    const first = (Object.values(data.data as Record<string, unknown[]>)[0] ?? [])[0] as Record<string, unknown>;
+    if (first)
+      expect(Object.keys(first).sort()).toEqual(['accounts', 'book', 'currency', 'qty', 'ret', 'sym', 'value']);
+  });
+
+  it('skips projection when raw is true', async () => {
+    server = await startHttpClientsService(0);
+    const port = (server.address() as { port: number }).port;
+
+    const { data } = await makeRequest(port, {
+      service: 'wealthsimple',
+      command: 'fetch-identity-positions',
+      args: { profile: 'eudes' },
+      raw: true,
+    });
+
+    expect(data.status, `live Wealthsimple credentials required — got ${JSON.stringify(data)}`).toBe('ok');
+    expect(data.projected).toBeUndefined();
+    const first = (Object.values(data.data as Record<string, unknown[]>)[0] ?? [])[0] as Record<string, unknown>;
+    if (first) expect(first).toHaveProperty('node');
+  });
+
   it('maps OTPRequired stderr to auth_required/flow:otp with hint', () => {
     const result = classifyCliResult(2, '', 'OTPRequired: (phone ending in ...45)\nTraceback ...') as Record<
       string,
@@ -117,6 +154,21 @@ describe('http-clients-service', () => {
       unknown
     >;
     expect(result.code).toBe('auth_required');
+    expect(result.flow).toBe('otp');
+  });
+
+  it('maps AuthenticationError to flow:token for a token-based service', () => {
+    const result = classifyCliResult(1, '', 'AuthenticationError: HTTP Error 400', {
+      service: 'costco',
+    }) as Record<string, unknown>;
+    expect(result.code).toBe('auth_required');
+    expect(result.flow).toBe('token');
+  });
+
+  it('keeps flow:otp for a service that is not token-based', () => {
+    const result = classifyCliResult(1, '', 'AuthenticationError: bad creds', {
+      service: 'wealthsimple',
+    }) as Record<string, unknown>;
     expect(result.flow).toBe('otp');
   });
 
@@ -148,20 +200,26 @@ describe('http-clients-service', () => {
     // command list it prints is the requested result, not a failure. Returning
     // it under `status: "error"` invited the agent to skip 26 KB of exactly the
     // names it then spent 35 calls guessing at.
-    const result = classifyCliResult(2, 'Commands:\n  fetch-identity-positions', '', true) as Record<string, unknown>;
+    const result = classifyCliResult(2, 'Commands:\n  fetch-identity-positions', '', { isListing: true }) as Record<
+      string,
+      unknown
+    >;
     expect(result.status).toBe('ok');
     expect(result.data).toContain('fetch-identity-positions');
     expect(result.code).toBeUndefined();
   });
 
   it('still reports a listing request that produced no output as an error', () => {
-    const result = classifyCliResult(2, '', 'No such service: nope', true) as Record<string, unknown>;
+    const result = classifyCliResult(2, '', 'No such service: nope', { isListing: true }) as Record<string, unknown>;
     expect(result.status).toBe('error');
     expect(result.code).toBe('cli_error');
   });
 
   it('leaves a failing command call an error even when it wrote to stdout', () => {
-    const result = classifyCliResult(2, 'Usage: ...', 'No such option: --nope', false) as Record<string, unknown>;
+    const result = classifyCliResult(2, 'Usage: ...', 'No such option: --nope', { isListing: false }) as Record<
+      string,
+      unknown
+    >;
     expect(result.status).toBe('error');
     expect(result.code).toBe('cli_error');
   });
@@ -220,7 +278,7 @@ describe('http-clients-service', () => {
   });
 
   it('renders service and command as positional args', () => {
-    expect(buildCliArgs('wealthsimple-v2', 'profiles')).toEqual(['wealthsimple-v2', 'profiles']);
+    expect(buildCliArgs('wealthsimple', 'profiles')).toEqual(['wealthsimple', 'profiles']);
   });
 
   it('omits missing service and command', () => {
@@ -228,8 +286,8 @@ describe('http-clients-service', () => {
   });
 
   it('renders string and number values as --key value', () => {
-    expect(buildCliArgs('wealthsimple-v2', 'fetch-contribution-ytd', { profile: 'eudes', 'tax-year': 2026 })).toEqual([
-      'wealthsimple-v2',
+    expect(buildCliArgs('wealthsimple', 'fetch-contribution-ytd', { profile: 'eudes', 'tax-year': 2026 })).toEqual([
+      'wealthsimple',
       'fetch-contribution-ytd',
       '--profile',
       'eudes',
@@ -239,26 +297,28 @@ describe('http-clients-service', () => {
   });
 
   it('repeats the flag once per array item (Typer list options)', () => {
-    expect(buildCliArgs('wealthsimple-v2', 'fetch-account-combined-financials', { ids: ['tfsa-a', 'rrsp-b'] })).toEqual(
-      ['wealthsimple-v2', 'fetch-account-combined-financials', '--ids', 'tfsa-a', '--ids', 'rrsp-b'],
-    );
+    expect(buildCliArgs('wealthsimple', 'fetch-account-combined-financials', { ids: ['tfsa-a', 'rrsp-b'] })).toEqual([
+      'wealthsimple',
+      'fetch-account-combined-financials',
+      '--ids',
+      'tfsa-a',
+      '--ids',
+      'rrsp-b',
+    ]);
   });
 
   it('renders an empty array as no flag at all', () => {
-    expect(buildCliArgs('wealthsimple-v2', 'fetch-accounts', { ids: [] })).toEqual([
-      'wealthsimple-v2',
-      'fetch-accounts',
-    ]);
+    expect(buildCliArgs('wealthsimple', 'fetch-accounts', { ids: [] })).toEqual(['wealthsimple', 'fetch-accounts']);
   });
 
   it('renders boolean true as a bare flag and false as --no-flag', () => {
-    expect(buildCliArgs('wealthsimple-v2', 'fetch-identity-positions', { aggregated: true })).toEqual([
-      'wealthsimple-v2',
+    expect(buildCliArgs('wealthsimple', 'fetch-identity-positions', { aggregated: true })).toEqual([
+      'wealthsimple',
       'fetch-identity-positions',
       '--aggregated',
     ]);
-    expect(buildCliArgs('wealthsimple-v2', 'fetch-identity-positions', { 'include-security': false })).toEqual([
-      'wealthsimple-v2',
+    expect(buildCliArgs('wealthsimple', 'fetch-identity-positions', { 'include-security': false })).toEqual([
+      'wealthsimple',
       'fetch-identity-positions',
       '--no-include-security',
     ]);
@@ -266,14 +326,14 @@ describe('http-clients-service', () => {
 
   it('mixes every value type in one call', () => {
     expect(
-      buildCliArgs('wealthsimple-v2', 'fetch-identity-positions', {
+      buildCliArgs('wealthsimple', 'fetch-identity-positions', {
         profile: 'eudes',
         first: 100,
         'account-ids': ['tfsa-a'],
         aggregated: true,
       }),
     ).toEqual([
-      'wealthsimple-v2',
+      'wealthsimple',
       'fetch-identity-positions',
       '--profile',
       'eudes',
@@ -283,6 +343,12 @@ describe('http-clients-service', () => {
       'tfsa-a',
       '--aggregated',
     ]);
+  });
+
+  it('does not treat raw as a CLI flag', () => {
+    // `raw` is a sibling of `args`, never a member of it. A `raw` key inside
+    // `args` would render `--raw`, which the CLI rejects.
+    expect(buildCliArgs('wealthsimple', 'fetch-identity-positions', { profile: 'eudes' })).not.toContain('--raw');
   });
 
   it('pins COLUMNS so Rich does not wrap help to 80 characters', () => {
@@ -300,5 +366,46 @@ describe('http-clients-service', () => {
 
   it('allows a paginated multi-profile read to run past 30 seconds', () => {
     expect(CLI_TIMEOUT_MS).toBe(60_000);
+  });
+
+  it('renders the reserved _ key as positional args after a -- separator', () => {
+    expect(buildCliArgs('costco', 'receipt-detail', { _: ['b1', 'b2'], profile: 'eudes' })).toEqual([
+      'costco',
+      'receipt-detail',
+      '--profile',
+      'eudes',
+      '--',
+      'b1',
+      'b2',
+    ]);
+  });
+
+  it('renders a single string _ as one positional', () => {
+    expect(buildCliArgs('costco', 'order-details', { _: 'ORD-1' })).toEqual(['costco', 'order-details', '--', 'ORD-1']);
+  });
+
+  it('renders a numeric positional as a string', () => {
+    expect(buildCliArgs('costco', 'order-details', { _: 12345 })).toEqual(['costco', 'order-details', '--', '12345']);
+  });
+
+  it('emits no separator for an empty _ array', () => {
+    expect(buildCliArgs('costco', 'receipt-detail', { _: [], profile: 'eudes' })).toEqual([
+      'costco',
+      'receipt-detail',
+      '--profile',
+      'eudes',
+    ]);
+  });
+
+  it('emits every flag before the separator regardless of key order', () => {
+    expect(buildCliArgs('costco', 'receipt-detail', { _: ['b1'], profile: 'eudes', verbose: true })).toEqual([
+      'costco',
+      'receipt-detail',
+      '--profile',
+      'eudes',
+      '--verbose',
+      '--',
+      'b1',
+    ]);
   });
 });

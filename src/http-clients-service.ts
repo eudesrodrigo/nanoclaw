@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 
 import { HTTP_CLIENTS_BIN } from './config.js';
 import { log } from './log.js';
+import { applyProjection } from './http-clients-projections.js';
 
 export function startHttpClientsService(port: number, host = '127.0.0.1'): Promise<Server> {
   return new Promise((resolve, reject) => {
@@ -21,7 +22,12 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
       const chunks: Buffer[] = [];
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
-        let body: { service?: string; command?: string; args?: Record<string, CliArgValue> };
+        let body: {
+          service?: string;
+          command?: string;
+          args?: Record<string, CliArgValue>;
+          raw?: boolean;
+        };
         try {
           body = JSON.parse(Buffer.concat(chunks).toString());
         } catch {
@@ -29,22 +35,24 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
           return;
         }
 
-        const { service, command, args } = body;
+        const { service, command, args, raw } = body;
 
         const cliArgs = buildCliArgs(service, command, args);
 
         const startedAt = Date.now();
-        runCli(cliArgs, !command)
+        runCli(cliArgs, !command, service)
           .then((result) => {
-            const code = (result as { code?: string; status?: string }).code ?? 'ok';
+            const projected = raw === true ? result : applyProjection(service, command, result);
+            const code = (projected as { code?: string; status?: string }).code ?? 'ok';
             log.info('http-clients call', {
               service: service ?? null,
               command: command ?? null,
               profile: args?.profile ?? null,
               code,
+              projected: (projected as { projected?: string }).projected ?? null,
               durationMs: Date.now() - startedAt,
             });
-            respond(res, 200, result);
+            respond(res, 200, projected);
           })
           .catch((err) => {
             log.error('http-clients-service CLI error', {
@@ -88,8 +96,16 @@ export function buildCliArgs(service?: string, command?: string, args?: Record<s
   if (command) cliArgs.push(command);
   if (!args) return cliArgs;
 
+  // `_` is reserved for positional arguments. Click stops parsing options at
+  // `--`, so every flag has to be emitted before the separator no matter where
+  // `_` sits in the object. A repeated separator is not a second separator —
+  // Click reads it as a value — so there is exactly one, or none.
+  const positionals: string[] = [];
+
   for (const [key, value] of Object.entries(args)) {
-    if (Array.isArray(value)) {
+    if (key === '_') {
+      for (const item of Array.isArray(value) ? value : [value]) positionals.push(String(item));
+    } else if (Array.isArray(value)) {
       // Typer collects a `list[str]` option by repeating the flag —
       // `--ids A --ids B`. A comma-joined single value is a different and
       // wrong thing to the API on the far side.
@@ -102,10 +118,12 @@ export function buildCliArgs(service?: string, command?: string, args?: Record<s
       cliArgs.push(`--${key}`, String(value));
     }
   }
+
+  if (positionals.length > 0) cliArgs.push('--', ...positionals);
   return cliArgs;
 }
 
-function runCli(args: string[], isListing = false): Promise<object> {
+function runCli(args: string[], isListing = false, service?: string): Promise<object> {
   return new Promise((resolve, reject) => {
     const proc = spawn(HTTP_CLIENTS_BIN, args, {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -122,17 +140,24 @@ function runCli(args: string[], isListing = false): Promise<object> {
     proc.on('close', (code) => {
       const out = Buffer.concat(stdout).toString().trim();
       const errOut = Buffer.concat(stderr).toString().trim();
-      resolve(classifyCliResult(code, out, errOut, isListing));
+      resolve(classifyCliResult(code, out, errOut, { isListing, service }));
     });
   });
 }
+
+// Services whose re-auth is a pasted refresh token, not a one-time code. The
+// CLI reports both as `AuthenticationError`, so the stderr text alone cannot
+// tell them apart. Default is `otp` because Wealthsimple uses OTP and it is
+// the only other service. Add a service here when it authenticates by token.
+const TOKEN_FLOW_SERVICES = new Set(['costco']);
 
 export function classifyCliResult(
   code: number | null,
   stdout: string,
   stderr: string,
-  isListing = false,
+  opts: { isListing?: boolean; service?: string } = {},
 ): object {
+  const { isListing = false, service } = opts;
   // A caller that names no command is asking for a listing. Typer prints the
   // list to stdout and exits 2, so classifying by exit code alone reported the
   // requested result as a failure — and an agent that skips an `error` envelope
@@ -175,7 +200,12 @@ export function classifyCliResult(
     return { status: 'error', code: 'auth_required', flow: 'token', message: stderr.split('\n')[0] };
   }
   if (stderr.includes('AuthenticationError')) {
-    return { status: 'error', code: 'auth_required', flow: 'otp', message: stderr.split('\n')[0] };
+    return {
+      status: 'error',
+      code: 'auth_required',
+      flow: service && TOKEN_FLOW_SERVICES.has(service) ? 'token' : 'otp',
+      message: stderr.split('\n')[0],
+    };
   }
 
   return {

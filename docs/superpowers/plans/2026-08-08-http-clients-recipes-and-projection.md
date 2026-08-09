@@ -673,9 +673,13 @@ git commit -m "feat(http-clients): add a payload projection engine"
       args: { profile: 'eudes' },
     });
 
-    // Skip when this host has no live credentials — the projection path only
-    // runs on `status: "ok"`.
-    if (data.status !== 'ok') return;
+    // These two tests exercise the live projection path. They require a host
+    // with authenticated Wealthsimple credentials. Never soft-pass: an
+    // unauthenticated host must break loudly, not report green.
+    expect(
+      data.status,
+      `live Wealthsimple credentials required — got ${JSON.stringify(data)}`,
+    ).toBe('ok');
     expect(data.projected).toBe('wealthsimple/fetch-identity-positions');
     const first = (Object.values(data.data as Record<string, unknown[]>)[0] ?? [])[0] as Record<string, unknown>;
     if (first) expect(Object.keys(first).sort()).toEqual(['accounts', 'book', 'qty', 'ret', 'sym', 'value']);
@@ -692,7 +696,10 @@ git commit -m "feat(http-clients): add a payload projection engine"
       raw: true,
     });
 
-    if (data.status !== 'ok') return;
+    expect(
+      data.status,
+      `live Wealthsimple credentials required — got ${JSON.stringify(data)}`,
+    ).toBe('ok');
     expect(data.projected).toBeUndefined();
     const first = (Object.values(data.data as Record<string, unknown[]>)[0] ?? [])[0] as Record<string, unknown>;
     if (first) expect(first).toHaveProperty('node');
@@ -759,7 +766,7 @@ function runCli(args: string[], isListing = false, service?: string): Promise<ob
 - [ ] **Step 4: Run the full host suite**
 
 Run: `pnpm test`
-Expected: PASS. The two projection tests return early when this host has no live Wealthsimple credentials; run them again on a host that does.
+Expected: PASS. The two projection tests require live Wealthsimple credentials and fail with an explicit message on a host that lacks them — this is intentional, they must never soft-pass.
 
 - [ ] **Step 5: Verify the size reduction against a live call**
 
