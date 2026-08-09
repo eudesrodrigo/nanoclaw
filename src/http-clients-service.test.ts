@@ -42,6 +42,26 @@ describe('http-clients-service', () => {
     if (server) await new Promise<void>((r) => server.close(() => r()));
   });
 
+  it('logs the failure message, not just the code', async () => {
+    // A `code` alone cannot be diagnosed after the fact. On 2026-08-09 a live
+    // `cli_error` reached the log with no text, and the cause — a malformed
+    // `ids` argument — was only recoverable from the container transcript.
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
+    const info = vi.spyOn(log, 'info').mockImplementation(() => {});
+    server = await startHttpClientsService(0);
+    const port = (server.address() as { port: number }).port;
+
+    const { data } = await makeRequest(port, { service: 'wealthsimple', command: 'no-such-command-here' });
+
+    expect(data.status).toBe('error');
+    expect(warn).toHaveBeenCalledWith(
+      'http-clients call failed',
+      expect.objectContaining({ command: 'no-such-command-here', message: expect.any(String) }),
+    );
+    warn.mockRestore();
+    info.mockRestore();
+  });
+
   it('returns 404 for non /call paths', async () => {
     server = await startHttpClientsService(0);
     const port = (server.address() as { port: number }).port;
@@ -245,13 +265,19 @@ describe('http-clients-service', () => {
   });
 
   it('logs every CLI call with service, command, classified code and duration', async () => {
-    const spy = vi.spyOn(log, 'info').mockImplementation(() => {});
+    // A success logs at info, a failure at warn. This call hits the live CLI,
+    // so its outcome depends on the host's Costco token — assert the shape of
+    // whichever line fired, not the outcome.
+    const info = vi.spyOn(log, 'info').mockImplementation(() => {});
+    const warn = vi.spyOn(log, 'warn').mockImplementation(() => {});
     server = await startHttpClientsService(0);
     const port = (server.address() as { port: number }).port;
 
     await makeRequest(port, { service: 'costco', command: 'receipts', args: { profile: 'eudes' } });
 
-    const call = spy.mock.calls.find((c) => c[0] === 'http-clients call');
+    const call =
+      info.mock.calls.find((c) => c[0] === 'http-clients call') ??
+      warn.mock.calls.find((c) => c[0] === 'http-clients call failed');
     expect(call).toBeDefined();
     const meta = call![1] as Record<string, unknown>;
     expect(meta.service).toBe('costco');
@@ -259,7 +285,8 @@ describe('http-clients-service', () => {
     expect(meta.profile).toBe('eudes');
     expect(typeof meta.code).toBe('string');
     expect(typeof meta.durationMs).toBe('number');
-    spy.mockRestore();
+    info.mockRestore();
+    warn.mockRestore();
   });
 
   it('returns 405 for non-POST methods', async () => {
@@ -304,6 +331,48 @@ describe('http-clients-service', () => {
       'tfsa-a',
       '--ids',
       'rrsp-b',
+    ]);
+  });
+
+  it('reads a JSON-array string as an array', () => {
+    // Observed live on 2026-08-09: the agent sent `ids` as the string
+    // '["ca-cash-a","tfsa-b"]'. It became one literal id and the API answered
+    // `NOT_FOUND` — a message that names nothing about the argument shape. The
+    // agent then burned a help call and a retry to find its own typo.
+    expect(
+      buildCliArgs('wealthsimple', 'fetch-account-combined-financials', { ids: '["ca-cash-a","tfsa-b"]' }),
+    ).toEqual(['wealthsimple', 'fetch-account-combined-financials', '--ids', 'ca-cash-a', '--ids', 'tfsa-b']);
+  });
+
+  it('reads a JSON-array string of positionals as positionals', () => {
+    expect(buildCliArgs('costco', 'receipt-detail', { _: '["b1","b2"]' })).toEqual([
+      'costco',
+      'receipt-detail',
+      '--',
+      'b1',
+      'b2',
+    ]);
+  });
+
+  it('keeps a string that is not a JSON array literal', () => {
+    // Only an array of primitives is a shape slip. Everything else is a value.
+    expect(buildCliArgs('wealthsimple', 'search', { q: '[draft] tfsa' })).toEqual([
+      'wealthsimple',
+      'search',
+      '--q',
+      '[draft] tfsa',
+    ]);
+    expect(buildCliArgs('wealthsimple', 'search', { q: '{"a":1}' })).toEqual([
+      'wealthsimple',
+      'search',
+      '--q',
+      '{"a":1}',
+    ]);
+    expect(buildCliArgs('wealthsimple', 'search', { q: '[{"a":1}]' })).toEqual([
+      'wealthsimple',
+      'search',
+      '--q',
+      '[{"a":1}]',
     ]);
   });
 

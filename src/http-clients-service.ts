@@ -44,14 +44,23 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
           .then((result) => {
             const projected = raw === true ? result : applyProjection(service, command, result);
             const code = (projected as { code?: string; status?: string }).code ?? 'ok';
-            log.info('http-clients call', {
+            const detail = {
               service: service ?? null,
               command: command ?? null,
               profile: args?.profile ?? null,
               code,
               projected: (projected as { projected?: string }).projected ?? null,
               durationMs: Date.now() - startedAt,
-            });
+            };
+            if (code === 'ok') {
+              log.info('http-clients call', detail);
+            } else {
+              // The code alone says a call failed, never why. Carry the CLI's
+              // own text, at a level that reaches the error log, so the cause
+              // survives past the container that saw it.
+              const message = (projected as { message?: string }).message;
+              log.warn('http-clients call failed', { ...detail, message: (message ?? '').slice(0, 500) });
+            }
             respond(res, 200, projected);
           })
           .catch((err) => {
@@ -90,6 +99,38 @@ export function cliEnv(): NodeJS.ProcessEnv {
   return { ...process.env, COLUMNS: '200' };
 }
 
+/**
+ * Read a list argument, in either shape the agent sends it.
+ *
+ * Observed live on 2026-08-09: the agent sent `ids` as the string
+ * `'["ca-cash-a","tfsa-b"]'` instead of an array. The whole string became one
+ * `--ids` value and the API answered `GraphQLResponseError: ['NOT_FOUND']` — a
+ * message that names nothing about the argument shape. The agent spent a help
+ * call and a retry to find its own typo. Accepting both shapes costs nothing
+ * and removes the round trip.
+ *
+ * Only an array of primitives counts. A value that merely starts with `[`
+ * stays a value, so a search term like `[draft] tfsa` is never split.
+ */
+function asStringList(value: CliArgValue): string[] | null {
+  if (Array.isArray(value)) return value.map(String);
+  if (typeof value !== 'string' || !value.trim().startsWith('[')) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(parsed)) return null;
+
+  const primitive = (item: unknown): boolean =>
+    typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean';
+  if (!parsed.every(primitive)) return null;
+
+  return parsed.map(String);
+}
+
 export function buildCliArgs(service?: string, command?: string, args?: Record<string, CliArgValue>): string[] {
   const cliArgs: string[] = [];
   if (service) cliArgs.push(service);
@@ -103,13 +144,16 @@ export function buildCliArgs(service?: string, command?: string, args?: Record<s
   const positionals: string[] = [];
 
   for (const [key, value] of Object.entries(args)) {
+    const list = asStringList(value);
+
     if (key === '_') {
-      for (const item of Array.isArray(value) ? value : [value]) positionals.push(String(item));
-    } else if (Array.isArray(value)) {
+      if (list) positionals.push(...list);
+      else positionals.push(String(value));
+    } else if (list) {
       // Typer collects a `list[str]` option by repeating the flag —
       // `--ids A --ids B`. A comma-joined single value is a different and
       // wrong thing to the API on the far side.
-      for (const item of value) cliArgs.push(`--${key}`, String(item));
+      for (const item of list) cliArgs.push(`--${key}`, item);
     } else if (typeof value === 'boolean') {
       // Typer renders a `bool` option as a `--flag / --no-flag` pair that
       // accepts no value, so the value has to live in the flag name.
