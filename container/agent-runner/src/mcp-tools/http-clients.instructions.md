@@ -2,7 +2,9 @@
 
 `mcp__nanoclaw__http_clients` proxies to the `http-clients` CLI on the host. Credentials are managed on the host — this agent never sees them, never needs them, and must never ask the user for them.
 
-All parameters are optional:
+Recipes for each service live in the `http-clients` skill. Read it first. It names the command each answer needs.
+
+All parameters are optional. Use this ladder for what the recipes do not cover:
 
 - `http_clients()` — lists services
 - `http_clients({ service })` — lists that service's commands
@@ -28,5 +30,3 @@ On `auth_required`, never ask for an email or password and never shell out. Call
 
 - `flow: "otp"` — `login` with `{profile}`; if it returns `auth_required`, ask the user **only** for the code (use `hint`), then `login` with `{profile, otp}` and retry.
 - `flow: "token"` — ask the user to paste a fresh `refresh_token`, then `login` with `{profile, token}` and retry.
-
-Recipes for each service live in the `http-clients` skill. Read it before combining calls.
