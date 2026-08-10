@@ -112,9 +112,22 @@ export function cliEnv(): NodeJS.ProcessEnv {
  * Only an array of primitives counts. A value that merely starts with `[`
  * stays a value, so a search term like `[draft] tfsa` is never split.
  */
-function asStringList(value: CliArgValue): string[] | null {
+const LIST_KEYS = new Set(['ids', '_']);
+
+function asStringList(key: string, value: CliArgValue): string[] | null {
   if (Array.isArray(value)) return value.map(String);
-  if (typeof value !== 'string' || !value.trim().startsWith('[')) return null;
+  if (typeof value !== 'string') return null;
+
+  // A comma-joined list is the second wrong shape the agent produced, on the
+  // run right after the JSON one. Splitting on a comma is only safe where the
+  // CLI declares a list option, so a free-text argument keeps its commas.
+  if (!value.trim().startsWith('[')) {
+    if (!LIST_KEYS.has(key) || !value.includes(',')) return null;
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  }
 
   let parsed: unknown;
   try {
@@ -144,7 +157,7 @@ export function buildCliArgs(service?: string, command?: string, args?: Record<s
   const positionals: string[] = [];
 
   for (const [key, value] of Object.entries(args)) {
-    const list = asStringList(value);
+    const list = asStringList(key, value);
 
     if (key === '_') {
       if (list) positionals.push(...list);

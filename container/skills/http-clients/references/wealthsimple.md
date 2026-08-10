@@ -37,7 +37,7 @@ Output:
 
 `book` against `value`; `ret` is the unrealized amount. Per account, `fetch-account-combined-financials` takes `ids` as an array; its `ret` and `rate` carry the deposit-adjusted return. `rate` can be `null` on some accounts — say "not available", never "0". A portfolio line of credit reports a negative `value` here.
 
-`ids` belongs to one profile. A mixed list under `profile: "all"` fails for every other profile's ids. Call once per profile.
+`ids` belongs to one profile. A mixed list under `profile: "all"` fails for every other profile's ids. Split `ids` by profile. Every other command still takes `profile: "all"` in one call.
 
 ## Read a card
 

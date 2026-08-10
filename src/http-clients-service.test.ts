@@ -344,6 +344,30 @@ describe('http-clients-service', () => {
     ).toEqual(['wealthsimple', 'fetch-account-combined-financials', '--ids', 'ca-cash-a', '--ids', 'tfsa-b']);
   });
 
+  it('reads a comma-joined list key as a list', () => {
+    // Observed live on 2026-08-09, the run after the JSON-string fix landed:
+    // the agent sent `ids` comma-joined instead. Same `NOT_FOUND`, same wasted
+    // help call. Only the keys that Typer declares as list options split this
+    // way — a free-text argument keeps its commas.
+    expect(buildCliArgs('wealthsimple', 'fetch-account-combined-financials', { ids: 'ca-cash-a,tfsa-b' })).toEqual([
+      'wealthsimple',
+      'fetch-account-combined-financials',
+      '--ids',
+      'ca-cash-a',
+      '--ids',
+      'tfsa-b',
+    ]);
+  });
+
+  it('never splits a non-list key on commas', () => {
+    expect(buildCliArgs('costco', 'receipts', { note: 'milk, eggs, bread' })).toEqual([
+      'costco',
+      'receipts',
+      '--note',
+      'milk, eggs, bread',
+    ]);
+  });
+
   it('reads a JSON-array string of positionals as positionals', () => {
     expect(buildCliArgs('costco', 'receipt-detail', { _: '["b1","b2"]' })).toEqual([
       'costco',
