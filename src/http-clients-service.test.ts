@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import http from 'http';
 
+import { addDecimal } from './http-clients-aggregate.js';
 import {
   startHttpClientsService,
   classifyCliResult,
@@ -146,6 +147,51 @@ describe('http-clients-service', () => {
     expect(data.projected).toBeUndefined();
     const first = (Object.values(data.data as Record<string, unknown[]>)[0] ?? [])[0] as Record<string, unknown>;
     if (first) expect(first).toHaveProperty('node');
+  });
+
+  it('totals a projected response when the caller asks for an aggregate', async () => {
+    server = await startHttpClientsService(0);
+    const port = (server.address() as { port: number }).port;
+
+    const { data } = await makeRequest(port, {
+      service: 'wealthsimple',
+      command: 'fetch-identity-positions',
+      args: { profile: 'eudes' },
+      aggregate: { group_by: 'sym', sum: ['value'] },
+    });
+
+    expect(data.status, `live Wealthsimple credentials required — got ${JSON.stringify(data)}`).toBe('ok');
+    expect(data.aggregate_error).toBeUndefined();
+    expect(data.aggregated).toMatchObject({ group_by: 'sym', sum: ['value'] });
+
+    // Assert the shape and the internal arithmetic, never a real amount — no
+    // live balance belongs in this repo.
+    const totals = data.data as { total: string; rows: { key: string; value: string; pct: string | null }[] };
+    expect(Array.isArray(totals.rows)).toBe(true);
+    let summed = '0';
+    for (const row of totals.rows) {
+      expect(typeof row.key).toBe('string');
+      summed = addDecimal(summed, row.value);
+    }
+    expect(addDecimal(summed, '0')).toBe(addDecimal(totals.total, '0'));
+  });
+
+  it('hands back the untouched rows when the aggregate spec matches nothing', async () => {
+    server = await startHttpClientsService(0);
+    const port = (server.address() as { port: number }).port;
+
+    const { data } = await makeRequest(port, {
+      service: 'wealthsimple',
+      command: 'fetch-identity-positions',
+      args: { profile: 'eudes' },
+      aggregate: { group_by: 'no_such_field' },
+    });
+
+    expect(data.status, `live Wealthsimple credentials required — got ${JSON.stringify(data)}`).toBe('ok');
+    expect(data.aggregate_error).toContain('no_such_field');
+    // The rows must survive: a failed aggregate may not cost the caller its data.
+    expect(data.projected).toBe('wealthsimple/fetch-identity-positions');
+    expect(data.data).toBeTypeOf('object');
   });
 
   it('maps OTPRequired stderr to auth_required/flow:otp with hint', () => {

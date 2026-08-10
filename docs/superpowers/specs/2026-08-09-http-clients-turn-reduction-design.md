@@ -194,3 +194,186 @@ estimate of a saving must be measured in production.
 The next lever is the prompt itself, not the recipes: 89s to the first call
 is prefill, and four extra MCP servers pay for it on every turn of every
 session.
+
+---
+
+# Part 2 — the answer turn
+
+**Date:** 2026-08-10
+**Status:** implemented
+**Goal:** the user set a target of 60s to an answer, changing only this repo.
+
+## Where the time goes
+
+One production reply took 231s. The container transcript splits it by turn:
+
+| Turn | Time | Output tokens |
+|------|------|---------------|
+| 1 | 49.3s | — |
+| 2 | 27.1s | — |
+| 3 | **135.5s** | **4,785** |
+
+Turn 3 is 59% of the reply. Its thinking block is 10,568 characters. The
+work in it is arithmetic: the model adds position values per symbol, and
+each value is a decimal string of up to 28 places.
+
+The endpoint generates at about 34 tokens per second. Latency here is
+generation-bound. Every token the model writes costs time, and thinking
+tokens cost the most because nothing else can start until they end.
+
+## Rejected — turn off thinking
+
+The SDK accepts a `thinking` option. On the raw endpoint the effect is large:
+
+| Setting | Time | Thinking tokens |
+|---------|------|-----------------|
+| default | 67.5s | 1,999 |
+| `{type: "enabled", budget_tokens: 512}` | 61.3s | 1,981 |
+| `{type: "disabled"}` | **5.0s** | 0 |
+
+Two results matter. First, **thinking is binary on this endpoint** — the
+budget is ignored, so a small budget buys nothing. Second, 5.0s looks like
+the whole problem solved.
+
+It is not. Thinking is what shapes the tool calls. With thinking off:
+
+- First-call test: **8 of 8** samples opened with a `command: null`
+  discovery listing instead of `fetch-all-accounts`. One invented a service
+  name.
+- End-to-end allocation test: **1 PASS of 4**. Three runs looped on `null`
+  until the turn cap.
+
+A fast wrong answer is not an answer. Dropped, with no code change.
+
+## Design — the host does the arithmetic
+
+`src/http-clients-aggregate.ts` totals the rows on the host. The agent asks
+for it through a new `aggregate` argument on the `http_clients` tool:
+
+```
+aggregate: {group_by, sum?, accounts?, profiles?}
+```
+
+The host replies with `{total, currency, rows: [{key, <sums>, pct}]}`.
+
+**Scope stays a conversation argument.** The host knows no person, no
+account nickname and no default account set. Every filter arrives from the
+caller. The agent still decides which accounts and profiles the question
+covers; it just stops doing the addition.
+
+### Exact arithmetic
+
+All maths scales to `BigInt`. IEEE 754 cannot hold these amounts — `0.1 +
+0.2` is `0.30000000000000004`, and one observed book value carried 28
+decimal places. Percentages round half away from zero at two places.
+
+### Failure is loud
+
+Any problem returns the original payload plus `aggregate_error`. There is no
+silent fallback. A fallback would hand back plausible numbers computed from
+the wrong rows, which is the one failure this file exists to prevent.
+
+`currency` is reported only when every matched row agrees. Otherwise it is
+`null`, because one number summed across two currencies is a false
+statement about money.
+
+### The instruction
+
+The fragment gains one rule, and the allocation recipe drops its arithmetic
+step:
+
+```
+**Never add amounts yourself.** For any total, share or percentage, pass
+`aggregate: {group_by, sum, accounts?, profiles?}`.
+```
+
+Six lines elsewhere were trimmed to stay under the 1,500-word cap.
+
+## Validation
+
+The harness drives the full allocation question against the production
+endpoint and model, with canned tool responses over fabricated positions:
+two profiles, nine accounts, 28-decimal values. One account is excluded by
+the question and holds about 73k.
+
+Grading is exact, by an independent `Decimal` implementation — deliberately
+not a port of the `BigInt` code, so a shared bug cannot make the test agree
+with itself. A run passes when every symbol's percentage is within 0.15pp,
+the total is right, and the excluded account's money never appears.
+
+| Arm | Fragment | `aggregate` offered | Samples | PASS | Turns | Median |
+|-----|----------|---------------------|---------|------|-------|--------|
+| C | the shipped Part 1 text | no | 4 | 4 | 8, 3, 8, 10 | **8** |
+| E | the new text | yes | 6 | 6 | 9, 3, 4, 3, 3, 3 | **3** |
+
+**Median turns fall from 8 to 3.** Four of arm E's six runs take exactly
+three: discover accounts, aggregate, answer.
+
+Arm C is accurate but wanders. Every 8-turn and 10-turn run calls
+`fetch-account-combined-financials` five to seven times, once per account,
+and two runs open a `command: null` discovery listing part-way through. The
+model reaches for more data because it is assembling the total itself.
+
+### The consolidation gap
+
+An earlier arm E build scored 3 PASS of 4. The failing run said the tool
+could not consolidate two profiles into one total, and returned two
+per-profile allocations instead.
+
+The host already consolidates: `applyAggregate` flattens every profile in
+the payload before grouping. Nothing said so. The fragment states elsewhere
+that output is always keyed by profile, and the agent generalised from that.
+
+One sentence closed it — a fact about what the host does, not a rule:
+
+```
+One call totals every profile in the response together; `profiles` narrows
+that set.
+```
+
+Three redundant clauses elsewhere paid for the words. Arm E then scored
+**6 of 6**.
+
+## Two harness bugs found and fixed
+
+Both were in the test scripts, not in the shipped code. Both had inverted a
+result before they were found.
+
+- The grader read `66,363.96` but not `66.363,96`. The agent answers in the
+  language of the question, so a correct pt-BR answer scored FAIL. One
+  number reader now serves the whole grader.
+- The turn loop rebound `tools`, the schema list it resends every turn, to
+  the turn's `tool_use` content blocks. From turn 2 the request carried
+  content blocks where the schemas belong. This invalidated every
+  multi-turn run before the fix.
+
+## Production — not yet measured
+
+`/tmp/hc-turns/probe.mjs` drives a full production turn without Telegram. It
+injects the message over the CLI socket and reads the answer out of
+`outbound.db`, so no run depends on a human sending a chat message.
+
+The first run after the change stopped at 112s and asked for a Wealthsimple
+`refresh_token`. That is the designed `flow: "token"` recovery, not a
+regression, but it ends the run before an answer.
+
+The auth failure is narrow. `src/http-clients-service.test.ts` passes 46 of
+46 against the live CLI at the same moment, including two calls to
+`fetch-identity-positions`. The command that failed is one the tests do not
+cover — the agent had moved on to `fetch-account-combined-financials`.
+
+That call is worth noting on its own. The recipe says cash is
+`fetch-account-combined-financials`'s `value` minus the account's positions
+`value`, so a question that includes cash still costs one call per account.
+The harness fixture carries `CASH` as a position symbol and never exercises
+that path. **The 3-turn result therefore holds for the aggregation, not for
+the cash rule.** Whether cash also belongs on the host is the next question.
+
+## Limits of the evidence
+
+- The positions, accounts and amounts in the harness are fabricated. No API
+  response was written to disk at any point.
+- The harness measures turns and accuracy, not wall-clock latency. Turn
+  count is the proxy, on the measured basis that turn cost dominates.
+- The 60s target is not yet demonstrated end to end in production.
+- Sample sizes are 4 (arm C) and 6 (arm E).

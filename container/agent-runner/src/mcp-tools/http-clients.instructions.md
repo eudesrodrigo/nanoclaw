@@ -20,12 +20,14 @@ All parameters are optional. `args` renders CLI arguments: string or number → 
 
 Which profiles and accounts belong in an answer is decided in the conversation. Ask; never assume a default set.
 
+**Never add amounts yourself.** For any total, share or percentage, pass `aggregate: {group_by, sum, accounts?, profiles?}`. The host totals exactly and returns `{total, currency, rows: [{key, <sums>, pct}]}`. One call totals every profile in the response together; `profiles` narrows that set. Amounts are decimal strings of up to 28 places; summing them yourself is slow and wrong. `aggregate_error` means nothing was totalled and the rows came back untouched — fix the spec and call again.
+
 ### Response format
 
 - Success: `{status: "ok", data: ...}`
 - Projected: the same, plus `projected: "<service>/<command>"`. The host trimmed the payload to the fields an answer needs. Re-run with `raw: true` when you need a field it dropped.
 - Auth required: `{status: "error", code: "auth_required", flow: "token"|"otp", message, hint?}`
-- Transient: `{status: "error", code: "transient", message}` — retryable. The credentials are fine, so **retry the same command**; do not re-authenticate. If it keeps failing, say the request did not go through and quote `message`. Do not assert a cause you cannot verify.
+- Transient: `{status: "error", code: "transient", message}` — retryable. The credentials are fine, so **retry the same command**; do not re-authenticate. If it keeps failing, say the request did not go through and quote `message`. Never assert a cause you cannot verify.
 - Partial (multi-profile): `{status: "ok", data: {results: {<profile>: <data>}, errors: {<profile>: {code, flow?, hint?, profile}}}}` — deliver `results` immediately, then recover each `errors` entry by its `code`, that profile only. Never drop good data because a sibling profile failed.
 - CLI error: `{status: "error", code: "cli_error", exitCode, message}`
 
@@ -60,7 +62,7 @@ The key above fits card payments. Any other write needs `args: {help: true}` fir
 
 ## Wealthsimple recipes
 
-Projected keys, per the host's projection table. Every rule that keeps an amount also keeps a `currency` key next to it. Re-run with `raw: true` for anything not listed.
+Projected keys, per the host's projection table. Every rule that keeps an amount also keeps `currency`. Re-run with `raw: true` for anything not listed.
 
 - `fetch-identity-positions` → `sym`, `accounts`, `qty`, `value`, `book`, `ret`, `currency`
 - `fetch-all-accounts` → `id`, `nickname`, `type`, `currency`, `status`
@@ -74,21 +76,18 @@ Projected keys, per the host's projection table. Every rule that keeps an amount
 
 ### Allocation by asset
 
-1. `fetch-identity-positions` for the chosen profiles.
-2. `fetch-all-accounts` for the account nicknames.
-3. Sum `value` across every position sharing a `sym`.
+1. `fetch-all-accounts` for the profiles in scope. Pick the account ids the question covers.
+2. `fetch-identity-positions` for the same profiles, with `aggregate: {group_by: "sym", sum: ["value"], accounts: [<the ids>]}`.
+3. State the rows the host returns. **Do no arithmetic.**
 
-- **One symbol is several positions.** The same symbol appears once per account holding it. A position's `accounts` field is an array — use every entry, not just the first.
-- **Trust the `currency` key, not the security's.** A USD-traded security can still carry a `value` in CAD. Never guess the currency, and never convert it yourself.
-- **Amounts are decimal strings**, some with 28 decimal places. Round to 2 decimals for display, and round only at the very end.
-- **Cash is not a position.** Per account it is `fetch-account-combined-financials`'s `value` minus the sum of that account's `fetch-identity-positions` `value` entries.
-- The projection drops `percentage_of_account` — a share of its own account, not the portfolio. Compute your own percentage from `value`.
+- **Trust the `currency` key, not the security's.** A USD-traded security can carry a CAD `value`. Never convert. `currency: null` means the rows disagreed — say so, and never total across currencies.
+- **Cash is not a position.** Per account it is `fetch-account-combined-financials`'s `value` minus that account's positions `value`.
+- Ignore `percentage_of_account` — it is a share of one account. `pct` is the portfolio share.
 
 Output:
 
 ```
 • <symbol> — $<value> (<pct>%)
-  – <account name>: $<value>
 ```
 
 ### Returns
@@ -99,7 +98,7 @@ Output:
 
 ### Read a card
 
-`fetch-credit-card-account` with `id` gives the current running balance: `current`, `outstanding`, `available`, `pending`. `fetch-credit-card-latest-statement` with `id` gives the last closed "fatura": `balance`, `min`, `due`. `fetch-account-combined-financials` returns `0` for a card, so it is the wrong source. A portfolio line of credit is not a card — read it under Returns.
+`fetch-credit-card-account` with `id` gives the running balance: `current`, `outstanding`, `available`, `pending`. `fetch-credit-card-latest-statement` with `id` gives the last closed "fatura": `balance`, `min`, `due`. `fetch-account-combined-financials` returns `0` for a card, so it is the wrong source. A portfolio line of credit is not a card — read it under Returns.
 
 Output:
 
@@ -116,10 +115,10 @@ Output:
 2. `fetch-credit-card-account` or `fetch-credit-card-latest-statement` — the amount owing.
 3. Confirm in chat, then `credit-card-payment`.
 
-- **The source is a Wealthsimple `CASH` account from `fetch-all-accounts`.** It is not `fetch-payment-methods`. That command's wording sounds like a match, but it returns external banks, not Wealthsimple cash accounts.
-- Read `credit-card-payment`'s own `args: {help: true}` output for the exact argument names before the first live call. Don't guess them.
+- **The source is a Wealthsimple `CASH` account from `fetch-all-accounts`.** It is not `fetch-payment-methods`. That command's wording sounds like a match, but it returns external banks.
+- Read `credit-card-payment`'s own `args: {help: true}` for the exact argument names before the first live call. Never guess them.
 - The amount is in cents: `14161` is $141.61.
-- One call is capped at 20000 cents. A larger balance needs one call per leg. Fill each leg to the cap and put the remainder last: $289.93 is `20000` then `8993`. Never split it evenly — a different split gives a different leg count, and the keys stop matching.
+- One call is capped at 20000 cents. A larger balance needs one call per leg. Fill each leg to the cap and put the remainder last: $289.93 is `20000` then `8993`. Never split evenly: it changes the leg count and the keys stop matching.
 - Follow "Moving money" above for the confirmation and the keys.
 
 ### Spending
@@ -134,10 +133,10 @@ No Costco command is projected. Every response comes back full-size, exactly as 
 
 Two costs compound: the number of calls, and the size of each response. Cut both.
 
-1. **Escalate the window.** Start at the 90-day default. Widen to 12 months only if nothing matched, then to 24. Stop at the first window that answers the question. Check `receipts`'s own options with `args: {help: true}` before guessing a date flag.
+1. **Escalate the window.** Start at the 90-day default, widen to 12 months only if nothing matched, then to 24. Stop at the first window that answers. Check `receipts`'s own `args: {help: true}` before guessing a date flag.
 2. `receipts` for that window, then collect the barcodes.
-3. **Batch, in chunks of at most 25.** Check `receipt-detail`'s own options with `args: {help: true}` first. Then pass the whole chunk in one call as `args: {_: [<barcode>, <barcode>]}` — the barcodes are positional, not a flag. One unbounded batch over two years returns megabytes, and one failure loses every barcode in it.
-4. Match item descriptions on a normalized substring. Descriptions are abbreviations — show the raw text in the answer so the user can judge the match.
+3. **Batch, in chunks of at most 25.** Check `receipt-detail`'s own options with `args: {help: true}` first. Then pass the whole chunk in one call as `args: {_: [<barcode>, <barcode>]}` — the barcodes are positional, not a flag. One unbounded batch returns megabytes, and one failure loses every barcode in it.
+4. Match descriptions on a normalized substring. They are abbreviations — show the raw text so the user can judge the match.
 
 Output:
 
@@ -147,7 +146,7 @@ Output:
 
 ### Recent orders, receipts, membership
 
-`orders` and `receipts`, each with an explicit window. Ask for the window if the user did not give one. `membership` is one call.
+`orders` and `receipts`, each with an explicit window. Ask for it if the user gave none. `membership` is one call.
 
 ### The refresh token
 

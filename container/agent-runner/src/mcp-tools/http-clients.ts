@@ -47,6 +47,30 @@ const httpClientsTool: McpToolDefinition = {
           description:
             'Skip host-side projection and return the full payload. Use when the response carried a "projected" key and you need a field it dropped.',
         },
+        aggregate: {
+          type: 'object',
+          description:
+            'Ask the host to total the rows instead of returning them. The host sums exactly and returns { total, currency, rows: [{ key, <sums>, pct }] }. Use it for any "how much in total" or "what share" question — never add the amounts yourself.',
+          properties: {
+            group_by: { type: 'string', description: 'Row field to group on, e.g. "sym".' },
+            sum: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Row fields to total. Defaults to ["value"]. Percentages use the first one.',
+            },
+            accounts: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Keep only rows touching these account ids. Omit to keep every account.',
+            },
+            profiles: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Keep only these profiles. Omit to keep every profile in the response.',
+            },
+          },
+          required: ['group_by'],
+        },
       },
       required: [],
     },
@@ -56,18 +80,19 @@ const httpClientsTool: McpToolDefinition = {
       return err('HTTP_CLIENTS_URL not configured — host service not available');
     }
 
-    const { service, command, args, raw } = params as {
+    const { service, command, args, raw, aggregate } = params as {
       service?: string;
       command?: string;
       args?: Record<string, CliArgValue>;
       raw?: boolean;
+      aggregate?: object;
     };
 
     try {
       const response = await fetch(`${HTTP_CLIENTS_URL}/call`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ service, command, args: args ?? {}, raw }),
+        body: JSON.stringify({ service, command, args: args ?? {}, raw, aggregate }),
       });
 
       const data = await response.json();

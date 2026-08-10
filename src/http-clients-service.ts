@@ -3,6 +3,7 @@ import { spawn } from 'child_process';
 
 import { HTTP_CLIENTS_BIN } from './config.js';
 import { log } from './log.js';
+import { applyAggregate, type AggregateSpec } from './http-clients-aggregate.js';
 import { applyProjection } from './http-clients-projections.js';
 
 export function startHttpClientsService(port: number, host = '127.0.0.1'): Promise<Server> {
@@ -27,6 +28,7 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
           command?: string;
           args?: Record<string, CliArgValue>;
           raw?: boolean;
+          aggregate?: AggregateSpec;
         };
         try {
           body = JSON.parse(Buffer.concat(chunks).toString());
@@ -35,7 +37,7 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
           return;
         }
 
-        const { service, command, args, raw } = body;
+        const { service, command, args, raw, aggregate } = body;
 
         const cliArgs = buildCliArgs(service, command, args);
 
@@ -43,13 +45,19 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
         runCli(cliArgs, !command, service)
           .then((result) => {
             const projected = raw === true ? result : applyProjection(service, command, result);
-            const code = (projected as { code?: string; status?: string }).code ?? 'ok';
+            // Aggregation runs after projection, on the trimmed row shape the
+            // agent asked about. It never runs unasked: a caller that wants
+            // the rows must get the rows.
+            const shaped = aggregate ? applyAggregate(projected, aggregate) : projected;
+            const code = (shaped as { code?: string; status?: string }).code ?? 'ok';
             const detail = {
               service: service ?? null,
               command: command ?? null,
               profile: args?.profile ?? null,
               code,
-              projected: (projected as { projected?: string }).projected ?? null,
+              projected: (shaped as { projected?: string }).projected ?? null,
+              aggregated: (shaped as { aggregated?: object }).aggregated ?? null,
+              aggregateError: (shaped as { aggregate_error?: string }).aggregate_error ?? null,
               durationMs: Date.now() - startedAt,
             };
             if (code === 'ok') {
@@ -58,10 +66,10 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
               // The code alone says a call failed, never why. Carry the CLI's
               // own text, at a level that reaches the error log, so the cause
               // survives past the container that saw it.
-              const message = (projected as { message?: string }).message;
+              const message = (shaped as { message?: string }).message;
               log.warn('http-clients call failed', { ...detail, message: (message ?? '').slice(0, 500) });
             }
-            respond(res, 200, projected);
+            respond(res, 200, shaped);
           })
           .catch((err) => {
             log.error('http-clients-service CLI error', {
