@@ -37,6 +37,8 @@ Output:
 
 `book` against `value`; `ret` is the unrealized amount. Per account, `fetch-account-combined-financials` takes `ids` as an array; its `ret` and `rate` carry the deposit-adjusted return. `rate` can be `null` on some accounts — say "not available", never "0". A portfolio line of credit reports a negative `value` here.
 
+`ids` belongs to one profile. A mixed list under `profile: "all"` fails for every other profile's ids. Call once per profile.
+
 ## Read a card
 
 `fetch-credit-card-account` with `id` gives the current running balance: `current`, `outstanding`, `available`, `pending`. `fetch-credit-card-latest-statement` with `id` gives the last closed "fatura": `balance`, `min`, `due`. `fetch-account-combined-financials` returns `0` for a card, so it is the wrong source. A portfolio line of credit is not a card — read it under Returns.
