@@ -3,25 +3,53 @@ import path from 'path';
 
 import { DATA_DIR, GROUPS_DIR } from './config.js';
 import { initContainerConfig } from './container-config.js';
+import { readEnvFile } from './env.js';
 import { log } from './log.js';
 import type { AgentGroup } from './types.js';
 
-const DEFAULT_SETTINGS_JSON =
-  JSON.stringify(
-    {
-      env: {
-        CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
-        CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
-        CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
-        ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet',
-        ANTHROPIC_DEFAULT_OPUS_MODEL: 'claude-opus',
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'claude-haiku',
+/** The model vars a group's settings.json is derived from. */
+const MODEL_ENV_KEYS = [
+  'ANTHROPIC_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+];
+
+/**
+ * Build the settings.json a new group starts with.
+ *
+ * The model ids come from the host `.env`, because that is what the
+ * credential proxy's upstream actually serves — hardcoding them here means a
+ * new group is born pointing at a model the upstream has never heard of. That
+ * had already happened: these defaults still said `claude-opus` while every
+ * live group ran a different id.
+ *
+ * The built-in fallbacks apply only when `.env` names no model at all, which
+ * is also the case where the proxy falls back to api.anthropic.com.
+ */
+export function buildDefaultSettings(env: Record<string, string>): string {
+  const opus = env.ANTHROPIC_DEFAULT_OPUS_MODEL || env.ANTHROPIC_MODEL || 'claude-opus';
+  const sonnet = env.ANTHROPIC_DEFAULT_SONNET_MODEL || env.ANTHROPIC_MODEL || 'claude-sonnet';
+  const haiku = env.ANTHROPIC_DEFAULT_HAIKU_MODEL || env.ANTHROPIC_MODEL || 'claude-haiku';
+
+  return (
+    JSON.stringify(
+      {
+        env: {
+          CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1',
+          CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: '1',
+          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '0',
+          ANTHROPIC_DEFAULT_SONNET_MODEL: sonnet,
+          ANTHROPIC_DEFAULT_OPUS_MODEL: opus,
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: haiku,
+        },
+        model: env.ANTHROPIC_MODEL || opus,
       },
-      model: 'claude-opus',
-    },
-    null,
-    2,
-  ) + '\n';
+      null,
+      2,
+    ) + '\n'
+  );
+}
 
 /**
  * Initialize the on-disk filesystem state for an agent group. Idempotent —
@@ -73,7 +101,7 @@ export function initGroupFilesystem(group: AgentGroup, opts?: { instructions?: s
 
   const settingsFile = path.join(claudeDir, 'settings.json');
   if (!fs.existsSync(settingsFile)) {
-    fs.writeFileSync(settingsFile, DEFAULT_SETTINGS_JSON);
+    fs.writeFileSync(settingsFile, buildDefaultSettings(readEnvFile(MODEL_ENV_KEYS)));
     initialized.push('settings.json');
   }
 
