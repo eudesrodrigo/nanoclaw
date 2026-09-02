@@ -246,3 +246,48 @@ describe('end-to-end with mock provider', () => {
     expect(outMessages[0].in_reply_to).toBe('m1');
   });
 });
+
+describe('follow-up pre-task scripts', () => {
+  // A task that becomes due while a query is still open arrives through the
+  // follow-up poller, not the main loop. Its script must gate it there too —
+  // otherwise a recurring task with a script wakes the agent on every tick.
+  async function runWithFollowUpTask(script: string): Promise<{ pushed: string[] }> {
+    const { loadConfig } = await import('./config.js');
+    loadConfig();
+    const { processQuery } = await import('./poll-loop.js');
+
+    insertMessage('t1', 'task', { prompt: 'check the card', script });
+
+    const provider = new MockProvider({}, () => 'ok');
+    const query = provider.query({ prompt: 'initial', cwd: '/tmp' });
+    const pushed: string[] = [];
+    const recording = {
+      ...query,
+      push(message: string) {
+        pushed.push(message);
+        query.push(message);
+      },
+    };
+
+    setTimeout(() => query.end(), 2000);
+    await processQuery(recording, extractRouting([]), []);
+
+    return { pushed };
+  }
+
+  it('should not push a follow-up task whose script returns wakeAgent=false', async () => {
+    const { pushed } = await runWithFollowUpTask(`echo '{"wakeAgent": false}'`);
+
+    expect(pushed).toEqual([]);
+    // The gated task is completed, not left pending for the next tick.
+    expect(getPendingMessages()).toHaveLength(0);
+  });
+
+  it('should push a follow-up task whose script returns wakeAgent=true, with its output', async () => {
+    const { pushed } = await runWithFollowUpTask(`echo '{"wakeAgent": true, "data": {"merchant": "Costco"}}'`);
+
+    expect(pushed).toHaveLength(1);
+    expect(pushed[0]).toContain('Script output:');
+    expect(pushed[0]).toContain('Costco');
+  });
+});

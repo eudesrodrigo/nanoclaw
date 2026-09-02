@@ -5,8 +5,12 @@ import { getUndeliveredMessages } from './db/messages-out.js';
 import { getPendingMessages } from './db/messages-in.js';
 import { MockProvider } from './providers/mock.js';
 import { runPollLoop } from './poll-loop.js';
+import { loadConfig } from './config.js';
 
 beforeEach(() => {
+  // The loop reads the runner config; without this it throws on the first
+  // iteration and the tests below never exercise anything.
+  loadConfig();
   initTestSessionDb();
   // Seed a destination so output parsing can resolve "discord-test" → routing
   getInboundDb()
@@ -30,6 +34,15 @@ function insertMessage(id: string, content: object, opts?: { platformId?: string
     .run(id, opts?.platformId ?? null, opts?.channelType ?? null, opts?.threadId ?? null, JSON.stringify(content));
 }
 
+function insertTask(id: string, content: object) {
+  getInboundDb()
+    .prepare(
+      `INSERT INTO messages_in (id, kind, timestamp, status, content, series_id)
+       VALUES (?, 'task', datetime('now'), 'pending', ?, ?)`,
+    )
+    .run(id, JSON.stringify(content), id);
+}
+
 describe('poll loop integration', () => {
   it('should pick up a message, process it, and write a response', async () => {
     insertMessage('m1', { sender: 'Alice', text: 'What is the meaning of life?' }, { platformId: 'chan-1', channelType: 'discord', threadId: 'thread-1' });
@@ -37,7 +50,7 @@ describe('poll loop integration', () => {
     const provider = new MockProvider({}, () => '<message to="discord-test">42</message>');
 
     const controller = new AbortController();
-    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 2000);
+    const loopPromise = runPollLoopUntilAborted(provider, controller.signal);
 
     await waitFor(() => getUndeliveredMessages().length > 0, 2000);
     controller.abort();
@@ -53,7 +66,7 @@ describe('poll loop integration', () => {
     const pending = getPendingMessages();
     expect(pending).toHaveLength(0);
 
-    await loopPromise.catch(() => {});
+    await loopPromise;
   });
 
   it('should process multiple messages in a batch', async () => {
@@ -62,7 +75,7 @@ describe('poll loop integration', () => {
 
     const provider = new MockProvider({}, () => '<message to="discord-test">Got both messages</message>');
     const controller = new AbortController();
-    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 2000);
+    const loopPromise = runPollLoopUntilAborted(provider, controller.signal);
 
     await waitFor(() => getUndeliveredMessages().length > 0, 2000);
     controller.abort();
@@ -71,13 +84,13 @@ describe('poll loop integration', () => {
     expect(out).toHaveLength(1);
     expect(JSON.parse(out[0].content).text).toBe('Got both messages');
 
-    await loopPromise.catch(() => {});
+    await loopPromise;
   });
 
   it('should process messages arriving after loop starts', async () => {
     const provider = new MockProvider({}, () => '<message to="discord-test">Processed</message>');
     const controller = new AbortController();
-    const loopPromise = runPollLoopWithTimeout(provider, controller.signal, 3000);
+    const loopPromise = runPollLoopUntilAborted(provider, controller.signal);
 
     // Insert message after loop has started
     await sleep(200);
@@ -89,22 +102,45 @@ describe('poll loop integration', () => {
     const out = getUndeliveredMessages();
     expect(out.length).toBeGreaterThanOrEqual(1);
 
-    await loopPromise.catch(() => {});
+    await loopPromise;
+  });
+
+  // Regression: a recurring task that comes due while the query from an
+  // earlier turn is still open arrives through the follow-up poller. Without
+  // the pre-task gate there, every tick reached the provider — a 15-minute
+  // task woke the agent all day long.
+  it('should not reach the provider when a follow-up task is gated by its script', async () => {
+    insertMessage('m1', { sender: 'Alice', text: 'Hello' });
+
+    const prompts: string[] = [];
+    const provider = new MockProvider({}, (prompt) => {
+      prompts.push(prompt);
+      return '<message to="discord-test">ok</message>';
+    });
+    const controller = new AbortController();
+    const loopPromise = runPollLoopUntilAborted(provider, controller.signal);
+
+    // The chat turn leaves the query open, waiting for follow-ups.
+    await waitFor(() => getUndeliveredMessages().length > 0, 2000);
+
+    insertTask('t-due', { prompt: 'check the card', script: `echo '{"wakeAgent": false}'` });
+    await waitFor(() => getPendingMessages().length === 0, 3000);
+
+    controller.abort();
+    await loopPromise;
+
+    // One provider turn: the chat message. The task never got there.
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0]).toContain('Hello');
+    expect(getUndeliveredMessages()).toHaveLength(1);
   });
 });
 
-// Helper: run poll loop until aborted or timeout
-async function runPollLoopWithTimeout(provider: MockProvider, signal: AbortSignal, timeoutMs: number): Promise<void> {
-  return Promise.race([
-    runPollLoop({
-      provider,
-      cwd: '/tmp',
-    }),
-    new Promise<void>((_, reject) => {
-      signal.addEventListener('abort', () => reject(new Error('aborted')));
-    }),
-    new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
-  ]);
+// Helper: run the poll loop until the signal aborts it. Awaiting the returned
+// promise after abort matters — a loop still running when afterEach closes the
+// session DB keeps the whole test process alive.
+function runPollLoopUntilAborted(provider: MockProvider, signal: AbortSignal): Promise<void> {
+  return runPollLoop({ provider, cwd: '/tmp', signal });
 }
 
 async function waitFor(condition: () => boolean, timeoutMs: number): Promise<void> {

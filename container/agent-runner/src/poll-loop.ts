@@ -26,6 +26,8 @@ export interface PollLoopConfig {
   systemContext?: {
     instructions?: string;
   };
+  /** Stops the loop between iterations. Tests use it; the container doesn't. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -54,7 +56,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
   clearStaleProcessingAcks();
 
   let pollCount = 0;
-  while (true) {
+  while (!config.signal?.aborted) {
     // Skip system messages — they're responses for MCP tools (e.g., ask_user_question)
     const messages = getPendingMessages().filter((m) => m.kind !== 'system');
     pollCount++;
@@ -123,23 +125,7 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
       continue;
     }
 
-    // Pre-task scripts: for any task rows with a `script`, run it before the
-    // provider call. Scripts returning wakeAgent=false (or erroring) gate
-    // their own task row only — surviving messages still go to the agent.
-    // Without the scheduling module, the marker block is empty, `keep`
-    // falls back to `normalMessages`, and no gating happens.
-    let keep: MessageInRow[] = normalMessages;
-    let skipped: string[] = [];
-    // MODULE-HOOK:scheduling-pre-task:start
-    const { applyPreTaskScripts } = await import('./scheduling/task-script.js');
-    const preTask = await applyPreTaskScripts(normalMessages);
-    keep = preTask.keep;
-    skipped = preTask.skipped;
-    if (skipped.length > 0) {
-      markCompleted(skipped);
-      log(`Pre-task script skipped ${skipped.length} task(s): ${skipped.join(', ')}`);
-    }
-    // MODULE-HOOK:scheduling-pre-task:end
+    const { keep, skipped } = await gatePreTaskScripts(normalMessages);
 
     if (keep.length === 0) {
       log(`All ${normalMessages.length} non-command message(s) gated by script, skipping query`);
@@ -168,6 +154,10 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
     // Process the query while concurrently polling for new messages
     const skippedSet = new Set(skipped);
     const processingIds = ids.filter((id) => !commandIds.includes(id) && !skippedSet.has(id));
+    // The query stays open waiting for follow-ups, so a stop request has to
+    // reach it here — otherwise the loop never comes back to check the signal.
+    const abortQuery = (): void => query.abort();
+    config.signal?.addEventListener('abort', abortQuery, { once: true });
     try {
       const result = await processQuery(query, routing, processingIds);
       if (result.continuation && result.continuation !== continuation) {
@@ -196,6 +186,8 @@ export async function runPollLoop(config: PollLoopConfig): Promise<void> {
         thread_id: routing.threadId,
         content: JSON.stringify({ text: `Error: ${errMsg}` }),
       });
+    } finally {
+      config.signal?.removeEventListener('abort', abortQuery);
     }
 
     // Ensure completed even if processQuery ended without a result event
@@ -239,11 +231,41 @@ function formatMessagesWithCommands(messages: MessageInRow[], nativeSlashCommand
   return parts.join('\n\n');
 }
 
+/**
+ * Pre-task scripts: for any task rows with a `script`, run it before the
+ * provider call. Scripts returning wakeAgent=false (or erroring) gate their
+ * own task row only — surviving messages still go to the agent. Gated rows
+ * are marked completed here so they don't come back on the next poll.
+ *
+ * Both paths into the provider go through this: the main loop and the
+ * follow-up poller in processQuery. A recurring task that comes due while a
+ * query is still open arrives through the second path, and skipping the gate
+ * there woke the agent on every tick.
+ *
+ * Without the scheduling module, the marker block is empty, `keep` falls back
+ * to the input, and no gating happens.
+ */
+async function gatePreTaskScripts(messages: MessageInRow[]): Promise<{ keep: MessageInRow[]; skipped: string[] }> {
+  let keep: MessageInRow[] = messages;
+  let skipped: string[] = [];
+  // MODULE-HOOK:scheduling-pre-task:start
+  const { applyPreTaskScripts } = await import('./scheduling/task-script.js');
+  const preTask = await applyPreTaskScripts(messages);
+  keep = preTask.keep;
+  skipped = preTask.skipped;
+  if (skipped.length > 0) {
+    markCompleted(skipped);
+    log(`Pre-task script skipped ${skipped.length} task(s): ${skipped.join(', ')}`);
+  }
+  // MODULE-HOOK:scheduling-pre-task:end
+  return { keep, skipped };
+}
+
 interface QueryResult {
   continuation?: string;
 }
 
-async function processQuery(
+export async function processQuery(
   query: AgentQuery,
   routing: RoutingContext,
   initialBatchIds: string[],
@@ -290,14 +312,18 @@ async function processQuery(
         const newIds = newMessages.map((m) => m.id);
         markProcessing(newIds);
 
-        const runnerConfig = getConfig();
-        if (runnerConfig.audioTranscription) {
-          await transcribeAudioInMessages(newMessages, runnerConfig.audioTranscription);
-        }
+        const { keep } = await gatePreTaskScripts(newMessages);
 
-        const prompt = formatMessages(newMessages);
-        log(`Pushing ${newMessages.length} follow-up message(s) into active query`);
-        query.push(prompt);
+        if (keep.length > 0) {
+          const runnerConfig = getConfig();
+          if (runnerConfig.audioTranscription) {
+            await transcribeAudioInMessages(keep, runnerConfig.audioTranscription);
+          }
+
+          const prompt = formatMessages(keep);
+          log(`Pushing ${keep.length} follow-up message(s) into active query`);
+          query.push(prompt);
+        }
 
         markCompleted(newIds);
       }
