@@ -479,6 +479,26 @@ async function buildContainerArgs(
     }
   }
 
+  // Host-gateway traffic must bypass the OneCLI proxy. The credential proxy
+  // (:3001) and http-clients (:3002) live on the host; if these requests go
+  // through HTTP_PROXY, OneCLI sees the placeholder x-api-key for a host it
+  // has no secret for and rejects the call with 401 credential_not_found.
+  // Pushed after applyContainerConfig so nothing overrides it.
+  args.push('-e', `NO_PROXY=${CONTAINER_HOST_GATEWAY}`);
+  args.push('-e', `no_proxy=${CONTAINER_HOST_GATEWAY}`);
+
+  // OneCLI's container config unconditionally adds ANTHROPIC_API_KEY=placeholder.
+  // In OAuth mode that makes the Claude CLI pick x-api-key auth, which the
+  // credential proxy passes through uninjected — the upstream then rejects it.
+  // Strip it so the CLI sticks to the CLAUDE_CODE_OAUTH_TOKEN placeholder flow.
+  if (authMode !== 'api-key') {
+    for (let i = args.length - 2; i >= 0; i--) {
+      if (args[i] === '-e' && args[i + 1]?.startsWith('ANTHROPIC_API_KEY=')) {
+        args.splice(i, 2);
+      }
+    }
+  }
+
   // User mapping
   const hostUid = process.getuid?.();
   const hostGid = process.getgid?.();
