@@ -33,7 +33,7 @@ export const ONECLI_URL = process.env.ONECLI_URL || envConfig.ONECLI_URL;
 // cleanupOrphans only reaps containers from this install, not peers.
 export const INSTALL_SLUG = getInstallSlug(PROJECT_ROOT);
 export const CONTAINER_INSTALL_LABEL = `nanoclaw-install=${INSTALL_SLUG}`;
-export const CREDENTIAL_PROXY_PORT = parseInt(process.env.CREDENTIAL_PROXY_PORT || '3001', 10);
+export const CREDENTIAL_PROXY_PORT = parseInt(process.env.CREDENTIAL_PROXY_PORT || '3010', 10);
 export const HTTP_CLIENTS_PORT = parseInt(process.env.HTTP_CLIENTS_PORT || '3002', 10);
 export const HTTP_CLIENTS_BIN = process.env.HTTP_CLIENTS_BIN || envConfig.HTTP_CLIENTS_BIN || 'http-clients';
 export const MAX_MESSAGES_PER_PROMPT = Math.max(1, parseInt(process.env.MAX_MESSAGES_PER_PROMPT || '10', 10) || 10);

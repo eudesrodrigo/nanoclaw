@@ -480,7 +480,7 @@ async function buildContainerArgs(
   }
 
   // Host-gateway traffic must bypass the OneCLI proxy. The credential proxy
-  // (:3001) and http-clients (:3002) live on the host; if these requests go
+  // (:3010) and http-clients (:3002) live on the host; if these requests go
   // through HTTP_PROXY, OneCLI sees the placeholder x-api-key for a host it
   // has no secret for and rejects the call with 401 credential_not_found.
   // Pushed after applyContainerConfig so nothing overrides it.
