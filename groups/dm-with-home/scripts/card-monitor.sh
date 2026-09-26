@@ -9,7 +9,9 @@
 # so the fetch aborts at 22s and reports a silent skip.
 #
 # Wakes the agent only when:
-#   - a new purchase appears (dedup by activity id in the state file)
+#   - a new purchase appears (dedup by the activity id ROOT in the state file;
+#     Wealthsimple re-issues the id with an extra lowercase suffix when an
+#     authorized purchase settles, so the raw id is not stable)
 #   - auth breaks (once, on the transition — not every tick)
 #   - 8 consecutive failed checks (once, on the transition)
 # A payment equal in value to a notified purchase marks it paid, silently.
@@ -33,10 +35,33 @@ const out = (wakeAgent, data) => {
 
 if (!URL_BASE) out(false, { skipped: "HTTP_CLIENTS_URL not set" });
 
+// Wealthsimple re-issues an activity id when an authorized purchase settles:
+// the settled variant is the same id plus "-<lowercase base36>" (e.g.
+// ...-7UZVA8 → ...-7UZVA8-0tly05u6n94k). Dedup must use the stable root.
+// The final root segment is short uppercase alnum, so requiring a lowercase
+// letter in the stripped segment never eats a root segment.
+const rootId = (id) => String(id).replace(/-(?=[^-]*[a-z])[0-9a-z]{8,}$/, "");
+
 const firstRun = !fs.existsSync(STATE);
 const state = firstRun
   ? { seen: {}, consumedPayments: [], authAlerted: false, failStreak: 0, failAlerted: false }
   : JSON.parse(fs.readFileSync(STATE, "utf8"));
+
+// One-time migration: collapse pre-rootId entries. Duplicates of one purchase
+// merge into the root key; "paid" wins over "notified" wins over "seeded" so a
+// paid purchase can never be offered for payment again.
+if (!state.rootIds) {
+  const rank = { paid: 2, notified: 1, seeded: 0 };
+  const merged = {};
+  for (const [id, s] of Object.entries(state.seen)) {
+    const key = rootId(id);
+    const prev = merged[key];
+    merged[key] = prev && rank[prev.st] >= rank[s.st] ? prev : s;
+  }
+  state.seen = merged;
+  state.consumedPayments = [...new Set((state.consumedPayments || []).map(rootId))];
+  state.rootIds = true;
+}
 
 const save = () => {
   fs.writeFileSync(STATE + ".tmp", JSON.stringify(state, null, 1));
@@ -107,12 +132,13 @@ const dollars = (c) => (c / 100).toFixed(2);
 const newPurchases = [];
 for (const a of rows) {
   if (a.type !== "purchase" || a.status === "reversed") continue;
-  const prev = state.seen[a.id];
+  const key = rootId(a.id);
+  const prev = state.seen[key];
   if (prev) {
     prev.amount = cents(a.amount); // authorized→settled can adjust the amount
     continue;
   }
-  state.seen[a.id] = {
+  state.seen[key] = {
     st: firstRun ? "seeded" : "notified",
     amount: cents(a.amount),
     merchant: a.merchant_name,
@@ -135,7 +161,7 @@ for (const a of rows) {
 const consumed = new Set(state.consumedPayments || []);
 const paidMarked = [];
 const payments = rows
-  .filter((a) => a.type === "payment" && !consumed.has(a.id))
+  .filter((a) => a.type === "payment" && !consumed.has(rootId(a.id)))
   .sort((x, y) => ts(x.occurred_at) - ts(y.occurred_at));
 for (const p of payments) {
   const match = Object.values(state.seen).find(
@@ -143,7 +169,7 @@ for (const p of payments) {
   );
   if (match) {
     match.st = "paid";
-    consumed.add(p.id);
+    consumed.add(rootId(p.id));
     paidMarked.push({ merchant: match.merchant, amount: dollars(match.amount) });
   }
 }
