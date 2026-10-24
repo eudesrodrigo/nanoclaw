@@ -10,7 +10,8 @@
 # bind mount at runtime (see src/container-runner.ts). Source-only changes
 # never require an image rebuild.
 
-FROM node:22-slim
+# Pinned by digest so a rebuild cannot reuse a cached older base; bump tag and digest together.
+FROM node:22.23.4-slim@sha256:de170b39439eb0e5a3444ad7d60b015614a381e10fecae2e30ec9e735122f38d
 
 # ---- Build-time arguments ----------------------------------------------------
 # CJK fonts add ~200MB. Opt in only if you render Chinese/Japanese/Korean text.
@@ -26,7 +27,7 @@ ARG GMAIL_MCP_VERSION=1.1.11
 ARG GOOGLE_CALENDAR_MCP_VERSION=2.6.1
 ARG GOOGLE_DRIVE_MCP_VERSION=2.2.0
 ARG GH_VERSION=2.91.0
-ARG BUN_VERSION=1.3.12
+ARG BUN_VERSION=1.4.4
 
 # ---- System dependencies -----------------------------------------------------
 # tini: correct PID 1 / signal forwarding so outbound.db writes finalize on
@@ -79,7 +80,8 @@ ENV GH_TOKEN=onecli-managed
 # the binary to /usr/local/bin so the non-root `node` user can execute it.
 RUN curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}" && \
     install -m 0755 /root/.bun/bin/bun /usr/local/bin/bun && \
-    rm -rf /root/.bun
+    rm -rf /root/.bun && \
+    test "$(bun --version)" = "${BUN_VERSION}"
 
 # ---- GitHub CLI (gh) ---------------------------------------------------------
 # Binary download (not in Debian apt). Pinned for reproducibility.

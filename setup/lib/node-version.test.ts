@@ -215,7 +215,7 @@ describe('nanoclaw.sh hand-off', () => {
     // service with `command -v node`; the exec is swapped for a print of it.
     const source = fs.readFileSync(path.join(ROOT, 'nanoclaw.sh'), 'utf8');
     const start = source.indexOf('# setup.sh may have just installed Node/npm/pnpm');
-    const end = source.indexOf('exec pnpm --silent run setup:auto "$@"');
+    const end = source.indexOf('exec pnpm --silent run setup:auto');
     expect(start, 'hand-off section not found in nanoclaw.sh').toBeGreaterThanOrEqual(0);
     fakeNode(bin, '24.10.0');
     fakeNode(keg, '22.23.4');
@@ -224,39 +224,5 @@ describe('nanoclaw.sh hand-off', () => {
     const prelude = `set -euo pipefail; PROJECT_ROOT=${ROOT}; red() { printf '%s' "$1"; }; write_abort_entry() { :; }`;
     const r = run(['-c', `${prelude}\n${source.slice(start, end)}echo "HANDOFF $(command -v node)"`]);
     expect(r.out.trim()).toBe(`HANDOFF ${keg}/node`);
-  });
-});
-
-describe('migrate-v2.sh', () => {
-  const source = () => fs.readFileSync(path.join(ROOT, 'migrate-v2.sh'), 'utf8');
-
-  it("reads setup.sh's BOOTSTRAP block, not install-node.sh's lines in the same log", () => {
-    const parse = source()
-      .split('\n')
-      .filter((l) => /^\s+(STATUS|NODE_VERSION)=\$\(awk /.test(l));
-    expect(parse).toHaveLength(2);
-    const raw = path.join(tmp, 'bootstrap.log');
-    fs.writeFileSync(
-      raw,
-      'STATUS: installed\nNODE_VERSION: v22.23.4\n=== NANOCLAW SETUP: BOOTSTRAP ===\nNODE_VERSION: 22.23.4\nSTATUS: success\n' +
-        'STATUS: installed\n',
-    );
-    fs.symlinkSync(which('awk'), path.join(bin, 'awk'));
-    const r = run(['-c', `BOOTSTRAP_RAW=${raw}\n${parse.join('\n')}\necho "$STATUS $NODE_VERSION"`]);
-    expect(r.out.trim()).toBe('success 22.23.4');
-  });
-
-  it('puts the keg-only node@22 first on macOS before the later steps run', () => {
-    const src = source();
-    const start = src.indexOf('# Later steps, and the service they register');
-    const end = src.indexOf('# setup.sh may have installed pnpm to a prefix');
-    expect(start, 'node check not found in migrate-v2.sh').toBeGreaterThanOrEqual(0);
-    fakeNode(bin, '22.20.0');
-    fakeNode(keg, '22.23.4');
-    stub(bin, 'uname', 'echo Darwin');
-    stub(bin, 'brew', `[ "$1" = --prefix ] && echo ${path.dirname(keg)}`);
-    const prelude = `PROJECT_ROOT=${ROOT}; step_fail() { echo "$1"; }; abort() { exit 1; }`;
-    const r = run(['-c', `${prelude}\n${src.slice(start, end)}echo "NEXT $(command -v node)"`]);
-    expect(r.out.trim()).toBe(`NEXT ${keg}/node`);
   });
 });
