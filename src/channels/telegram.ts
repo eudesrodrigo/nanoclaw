@@ -10,11 +10,12 @@ import { log } from '../log.js';
 import { createMessagingGroup, getMessagingGroupByPlatform, updateMessagingGroup } from '../db/messaging-groups.js';
 import { grantRole, hasAnyOwner } from '../modules/permissions/db/user-roles.js';
 import { upsertUser } from '../modules/permissions/db/users.js';
-import { createChatSdkBridge, type ReplyContext } from './chat-sdk-bridge.js';
+import { createChatSdkBridge } from './chat-sdk-bridge.js';
 import { sanitizeTelegramLegacyMarkdown } from './telegram-markdown-sanitize.js';
 import { registerChannelAdapter } from './channel-registry.js';
 import type { ChannelAdapter, ChannelSetup, InboundMessage } from './adapter.js';
 import { tryConsume } from './telegram-pairing.js';
+import { extractReplyContext } from './telegram-reply.js';
 
 /**
  * Retry a one-shot operation that can fail on transient network errors at
@@ -36,16 +37,6 @@ async function withRetry<T>(fn: () => Promise<T>, label: string, maxAttempts = 5
     }
   }
   throw lastErr;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractReplyContext(raw: Record<string, any>): ReplyContext | null {
-  if (!raw.reply_to_message) return null;
-  const reply = raw.reply_to_message;
-  return {
-    text: reply.text || reply.caption || '',
-    sender: reply.from?.first_name || reply.from?.username || 'Unknown',
-  };
 }
 
 /** Look up the bot username via Telegram getMe. Cached after first call. */

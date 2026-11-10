@@ -37,6 +37,7 @@ interface GatewayAdapter extends Adapter {
 export interface ReplyContext {
   text: string;
   sender: string;
+  messageId?: number;
 }
 
 /** Extract reply context from a platform-specific raw message. Return null if no reply. */
