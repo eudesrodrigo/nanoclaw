@@ -148,6 +148,7 @@ function stranger(text: string) {
         text,
       }),
       timestamp: now(),
+      isMention: true,
     },
   };
 }

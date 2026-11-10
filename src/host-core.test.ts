@@ -222,6 +222,7 @@ describe('router', () => {
         kind: 'chat',
         content: JSON.stringify({ sender: 'User', text: 'Hello agent!' }),
         timestamp: now(),
+        isMention: true,
       },
     };
 
@@ -289,7 +290,7 @@ describe('router', () => {
       channelType: 'discord',
       platformId: 'chan-123',
       threadId: null,
-      message: { id: 'msg-a', kind: 'chat', content: JSON.stringify({ sender: 'A', text: 'First' }), timestamp: now() },
+      message: { id: 'msg-a', kind: 'chat', content: JSON.stringify({ sender: 'A', text: 'First' }), timestamp: now(), isMention: true },
     });
 
     await routeInbound({
@@ -301,6 +302,7 @@ describe('router', () => {
         kind: 'chat',
         content: JSON.stringify({ sender: 'B', text: 'Second' }),
         timestamp: now(),
+        isMention: true,
       },
     });
 
@@ -344,7 +346,7 @@ describe('router', () => {
       channelType: 'discord',
       platformId: 'chan-123',
       threadId: null,
-      message: { id: 'msg-fan', kind: 'chat', content: JSON.stringify({ text: 'hello all' }), timestamp: now() },
+      message: { id: 'msg-fan', kind: 'chat', content: JSON.stringify({ text: 'hello all' }), timestamp: now(), isMention: true },
     });
 
     // Both agents should now have their own session and be woken.
@@ -360,11 +362,14 @@ describe('router', () => {
     const { wakeContainer } = await import('./container-runner.js');
     (wakeContainer as unknown as ReturnType<typeof vi.fn>).mockClear();
 
-    // Replace the seed row with a mention-only wiring whose accumulate
-    // policy should store context even when the message doesn't mention us.
+    // Replace the seed row with a pattern wiring that never matches, with
+    // accumulate policy: a mentioned message the wiring declines still gets
+    // stored as context. (Unmentioned group chatter now drops before this
+    // path — see the mention-gate test.)
     const { updateMessagingGroupAgent } = await import('./db/messaging-groups.js');
     updateMessagingGroupAgent('mga-1', {
-      engage_mode: 'mention',
+      engage_mode: 'pattern',
+      engage_pattern: '^zzz',
       ignored_message_policy: 'accumulate',
     });
 
@@ -375,8 +380,9 @@ describe('router', () => {
       message: {
         id: 'msg-nomatch',
         kind: 'chat',
-        content: JSON.stringify({ text: 'no mention here' }),
+        content: JSON.stringify({ text: 'no match here' }),
         timestamp: now(),
+        isMention: true,
       },
     });
 
@@ -412,6 +418,49 @@ describe('router', () => {
     expect(wakeContainer).not.toHaveBeenCalled();
     // No session should have been created for this agent.
     expect(findSession('mg-1', null)).toBeUndefined();
+  });
+
+  it('requires a mention for group messages even with pattern wiring', async () => {
+    const { routeInbound } = await import('./router.js');
+    const { wakeContainer } = await import('./container-runner.js');
+    (wakeContainer as unknown as ReturnType<typeof vi.fn>).mockClear();
+
+    await routeInbound({
+      channelType: 'discord',
+      platformId: 'chan-123',
+      threadId: null,
+      message: {
+        id: 'msg-nomention',
+        kind: 'chat',
+        content: JSON.stringify({ text: 'plain chatter' }),
+        timestamp: now(),
+      },
+    });
+
+    expect(wakeContainer).not.toHaveBeenCalled();
+    expect(findSession('mg-1', null)).toBeUndefined();
+  });
+
+  it('still engages group messages that carry a mention', async () => {
+    const { routeInbound } = await import('./router.js');
+    const { wakeContainer } = await import('./container-runner.js');
+    (wakeContainer as unknown as ReturnType<typeof vi.fn>).mockClear();
+
+    await routeInbound({
+      channelType: 'discord',
+      platformId: 'chan-123',
+      threadId: null,
+      message: {
+        id: 'msg-mention',
+        kind: 'chat',
+        content: JSON.stringify({ text: '@bot hello' }),
+        timestamp: now(),
+        isMention: true,
+      },
+    });
+
+    expect(wakeContainer).toHaveBeenCalled();
+    expect(findSession('mg-1', null)).toBeDefined();
   });
 });
 

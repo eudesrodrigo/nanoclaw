@@ -6,6 +6,19 @@ import { log } from './log.js';
 import { applyAggregate, type AggregateSpec } from './http-clients-aggregate.js';
 import { applyProjection } from './http-clients-projections.js';
 
+export interface HttpClientsCall {
+  service?: string;
+  command?: string;
+  args?: Record<string, CliArgValue>;
+  raw?: boolean;
+}
+
+export async function callHttpClients(call: HttpClientsCall): Promise<object> {
+  const cliArgs = buildCliArgs(call.service, call.command, call.args);
+  const result = await runCli(cliArgs, !call.command, call.service);
+  return call.raw === true ? result : applyProjection(call.service, call.command, result);
+}
+
 export function startHttpClientsService(port: number, host = '127.0.0.1'): Promise<Server> {
   return new Promise((resolve, reject) => {
     const server = createServer((req, res) => {
@@ -23,13 +36,7 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
       const chunks: Buffer[] = [];
       req.on('data', (c) => chunks.push(c));
       req.on('end', () => {
-        let body: {
-          service?: string;
-          command?: string;
-          args?: Record<string, CliArgValue>;
-          raw?: boolean;
-          aggregate?: AggregateSpec;
-        };
+        let body: HttpClientsCall & { aggregate?: AggregateSpec };
         try {
           body = JSON.parse(Buffer.concat(chunks).toString());
         } catch {
@@ -39,16 +46,13 @@ export function startHttpClientsService(port: number, host = '127.0.0.1'): Promi
 
         const { service, command, args, raw, aggregate } = body;
 
-        const cliArgs = buildCliArgs(service, command, args);
-
         const startedAt = Date.now();
-        runCli(cliArgs, !command, service)
+        callHttpClients({ service, command, args, raw })
           .then((result) => {
-            const projected = raw === true ? result : applyProjection(service, command, result);
             // Aggregation runs after projection, on the trimmed row shape the
             // agent asked about. It never runs unasked: a caller that wants
             // the rows must get the rows.
-            const shaped = aggregate ? applyAggregate(projected, aggregate) : projected;
+            const shaped = aggregate ? applyAggregate(result, aggregate) : result;
             const code = (shaped as { code?: string; status?: string }).code ?? 'ok';
             const detail = {
               service: service ?? null,

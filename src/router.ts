@@ -28,6 +28,7 @@ import {
 } from './db/messaging-groups.js';
 import { findSessionForAgent } from './db/sessions.js';
 import { startTypingRefresh } from './modules/typing/index.js';
+import { tryCardPayInbound } from './modules/card-pay/index.js';
 import { log } from './log.js';
 import { resolveSession, writeSessionMessage, writeOutboundDirect } from './session-manager.js';
 import { wakeContainer } from './container-runner.js';
@@ -232,6 +233,25 @@ export async function routeInbound(event: InboundEvent): Promise<void> {
   //    side effect so later role/access lookups find a real record).
   //    Without the module, userId is null — downstream tolerates it.
   const userId: string | null = senderResolver ? senderResolver(event) : null;
+
+  const cardPayClaimed = await tryCardPayInbound(event, mg, userId);
+  if (cardPayClaimed) return;
+
+  if (mg.is_group !== 0 && !isMention) {
+    const parsedContent = safeParseContent(
+      typeof event.message.content === 'string' ? event.message.content : JSON.stringify(event.message.content),
+    );
+    recordDroppedMessage({
+      channel_type: event.channelType,
+      platform_id: event.platformId,
+      user_id: userId,
+      sender_name: parsedContent.sender ?? null,
+      reason: 'no_mention',
+      messaging_group_id: mg.id,
+      agent_group_id: null,
+    });
+    return;
+  }
 
   // 3. Fetch wired agents in full (we already know the count is > 0; now
   //    we need their actual rows for fan-out).

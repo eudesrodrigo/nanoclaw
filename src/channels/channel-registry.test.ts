@@ -180,6 +180,7 @@ describe('channel + router integration', () => {
         kind: 'chat',
         content: JSON.stringify(inboundContent),
         timestamp: now(),
+        isMention: true,
       },
     });
 

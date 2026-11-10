@@ -15,6 +15,7 @@ import { runMigrations } from './db/migrations/index.js';
 import { ensureContainerRuntimeRunning, cleanupOrphans, PROXY_BIND_HOST } from './container-runtime.js';
 import { startActiveDeliveryPoll, startSweepDeliveryPoll, setDeliveryAdapter, stopDeliveryPolls } from './delivery.js';
 import { startHostSweep, stopHostSweep } from './host-sweep.js';
+import { startCardPay, stopCardPay } from './modules/card-pay/index.js';
 import { routeInbound } from './router.js';
 import { log } from './log.js';
 
@@ -174,6 +175,13 @@ async function main(): Promise<void> {
   // 6. Start host sweep
   startHostSweep();
   log.info('Host sweep started');
+
+  // 7. Card-pay monitor (disabled until activated in its state file)
+  startCardPay();
+  onShutdown(() => {
+    stopCardPay();
+    return Promise.resolve();
+  });
 
   log.info('NanoClaw running');
 }
