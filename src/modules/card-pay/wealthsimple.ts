@@ -57,7 +57,11 @@ const firstNumber = (rec: Record<string, unknown>, keys: string[]): number | nul
 export interface WsClient {
   fetchActivities(cardId: string, profile: string, startDate: string): Promise<Activity[]>;
   fetchCashAccounts(profile: string): Promise<Array<{ id: string; name: string }>>;
-  fetchWithdrawableCents(accountIds: string[], destinationId: string, profile: string): Promise<Array<{ accountId: string; cents: number | null }>>;
+  fetchWithdrawableCents(
+    accountIds: string[],
+    destinationId: string,
+    profile: string,
+  ): Promise<Array<{ accountId: string; cents: number | null }>>;
   payCard(input: PayInput): Promise<PayOutcome>;
 }
 
@@ -70,18 +74,25 @@ export function createWsClient(call: CallFn): WsClient {
         args: { 'credit-account-id': cardId, profile, 'start-date': startDate },
         raw: true,
       })) as { status?: string; code?: string; message?: string; data?: unknown };
-      if (res.status !== 'ok') throw Object.assign(new Error(res.message || res.code || 'fetch failed'), { code: res.code });
+      if (res.status !== 'ok')
+        throw Object.assign(new Error(res.message || res.code || 'fetch failed'), { code: res.code });
       return unwrapProfileRows(res.data) as Activity[];
     },
 
     async fetchCashAccounts(profile) {
-      const res = (await call({ service: 'wealthsimple', command: 'fetch-all-accounts', args: { profile }, raw: true })) as {
+      const res = (await call({
+        service: 'wealthsimple',
+        command: 'fetch-all-accounts',
+        args: { profile },
+        raw: true,
+      })) as {
         status?: string;
         code?: string;
         message?: string;
         data?: unknown;
       };
-      if (res.status !== 'ok') throw Object.assign(new Error(res.message || res.code || 'fetch failed'), { code: res.code });
+      if (res.status !== 'ok')
+        throw Object.assign(new Error(res.message || res.code || 'fetch failed'), { code: res.code });
       const rows = unwrapProfileRows(res.data) as Record<string, unknown>[];
       return rows
         .map((r) => ({
@@ -92,7 +103,7 @@ export function createWsClient(call: CallFn): WsClient {
           status: (firstString(r, ['status', 'state']) ?? '').toUpperCase(),
         }))
         .filter((a) => a.id && a.type === 'CASH' && a.currency === 'CAD' && a.status !== 'CLOSED')
-        .map((a) => ({ id: a.id as string, name: a.name ?? a.id as string }));
+        .map((a) => ({ id: a.id as string, name: a.name ?? (a.id as string) }));
     },
 
     async fetchWithdrawableCents(accountIds, destinationId, profile) {
@@ -102,7 +113,8 @@ export function createWsClient(call: CallFn): WsClient {
         args: { 'account-ids': accountIds, 'destination-id': destinationId, 'destination-type': 'Account', profile },
         raw: true,
       })) as { status?: string; code?: string; message?: string; data?: unknown };
-      if (res.status !== 'ok') throw Object.assign(new Error(res.message || res.code || 'fetch failed'), { code: res.code });
+      if (res.status !== 'ok')
+        throw Object.assign(new Error(res.message || res.code || 'fetch failed'), { code: res.code });
       const rows = unwrapProfileRows(res.data) as Record<string, unknown>[];
       return rows.map((r) => ({
         accountId: firstString(r, ['account_id', 'accountId', 'id']) ?? '',

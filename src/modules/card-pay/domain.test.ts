@@ -16,7 +16,13 @@ function freshState(): CardPayState {
   };
 }
 
-const purchase = (id: string, amount: string, merchant = 'Loja', status = 'settled', occurred = '2026-11-09T12:00:00Z'): Activity => ({
+const purchase = (
+  id: string,
+  amount: string,
+  merchant = 'Loja',
+  status = 'settled',
+  occurred = '2026-11-09T12:00:00Z',
+): Activity => ({
   id,
   type: 'purchase',
   status,
@@ -79,18 +85,26 @@ describe('processActivities', () => {
     expect(s.seen.p1).toBeUndefined();
   });
 
-  it('marks a notified purchase paid when a matching payment appears', () => {
+  it('marks a notified purchase inferred_paid when a matching payment appears', () => {
     const s = freshState();
     s.seen.p1 = { st: 'notified', amount: 1000, merchant: 'Loja', at: '2026-11-09T12:00:00Z' };
     const out = processActivities(
       s,
       [
         purchase('p1', '10.00'),
-        { id: 'pay1', type: 'payment', status: 'posted', amount: '-10.00', merchant_name: 'Pagamento', currency: 'CAD', occurred_at: '2026-11-09T13:00:00Z' },
+        {
+          id: 'pay1',
+          type: 'payment',
+          status: 'posted',
+          amount: '-10.00',
+          merchant_name: 'Pagamento',
+          currency: 'CAD',
+          occurred_at: '2026-11-09T13:00:00Z',
+        },
       ],
       false,
     );
-    expect(s.seen.p1.st).toBe('paid');
+    expect(s.seen.p1.st).toBe('inferred_paid');
     expect(out.paidMarked).toEqual([{ merchant: 'Loja', amount: '10.00' }]);
     expect(s.consumedPayments).toContain('pay1');
   });
@@ -99,10 +113,18 @@ describe('processActivities', () => {
     const s = freshState();
     s.seen.p1 = { st: 'notified', amount: 1000, merchant: 'A', at: '2026-11-09T12:00:00Z' };
     s.seen.p2 = { st: 'notified', amount: 1000, merchant: 'B', at: '2026-11-09T12:05:00Z' };
-    const pay = { id: 'pay1', type: 'payment', status: 'posted', amount: '-10.00', merchant_name: 'Pagamento', currency: 'CAD', occurred_at: '2026-11-09T13:00:00Z' };
+    const pay = {
+      id: 'pay1',
+      type: 'payment',
+      status: 'posted',
+      amount: '-10.00',
+      merchant_name: 'Pagamento',
+      currency: 'CAD',
+      occurred_at: '2026-11-09T13:00:00Z',
+    };
     processActivities(s, [purchase('p1', '10.00', 'A'), purchase('p2', '10.00', 'B'), pay], false);
     processActivities(s, [purchase('p1', '10.00', 'A'), purchase('p2', '10.00', 'B'), pay], false);
-    const paidCount = Object.values(s.seen).filter((e) => e.st === 'paid').length;
+    const paidCount = Object.values(s.seen).filter((e) => e.st === 'inferred_paid').length;
     expect(paidCount).toBe(1);
   });
 

@@ -14,7 +14,15 @@ let nowMs: number;
 let seq: number;
 
 function purchase(id: string, amount: string, merchant = 'Loja', occurred = '2026-11-09T12:00:00Z'): Activity {
-  return { id, type: 'purchase', status: 'settled', amount, merchant_name: merchant, currency: 'CAD', occurred_at: occurred };
+  return {
+    id,
+    type: 'purchase',
+    status: 'settled',
+    amount,
+    merchant_name: merchant,
+    currency: 'CAD',
+    occurred_at: occurred,
+  };
 }
 
 function baseState(overrides: Partial<CardPayState> = {}): CardPayState {
@@ -182,6 +190,74 @@ describe('pollOnce', () => {
     await svc.pollOnce();
     expect(loadState().offers[0].state).toBe('expired');
   });
+
+  it('a poll in flight cannot clobber payment state written by a reply', async () => {
+    saveState(baseState());
+    const ws = makeWs({
+      fetchActivities: vi.fn(async () => [purchase('p1', '10.00')]),
+      fetchCashAccounts: vi.fn(async () => [{ id: 'ca-1', name: 'Geral' }]),
+      fetchWithdrawableCents: vi.fn(async () => [{ accountId: 'ca-1', cents: 100000 }]),
+      payCard: vi.fn(async () => ({ outcome: 'accepted' }) as const),
+    });
+    const svc = createCardPayService(makeDeps(ws));
+
+    await svc.pollOnce();
+    telegramIds[sent[0].messageOutId] = 555;
+
+    let releaseFetch!: (rows: Activity[]) => void;
+    const fetchGate = new Promise<Activity[]>((r) => (releaseFetch = r));
+    (ws.fetchActivities as ReturnType<typeof vi.fn>).mockImplementation(() => fetchGate);
+
+    const poll = svc.pollOnce();
+    const reply = svc.handleInbound(replyEvent('1', 555), group, 'telegram:eudes');
+    releaseFetch([purchase('p1', '10.00')]);
+    await Promise.all([poll, reply]);
+
+    const s = loadState();
+    expect(ws.payCard).toHaveBeenCalledTimes(1);
+    expect(s.offers[0].state).toBe('paid');
+    expect(s.attempts).toHaveLength(1);
+    expect(s.attempts[0].state).toBe('accepted');
+
+    (ws.fetchActivities as ReturnType<typeof vi.fn>).mockResolvedValue([purchase('p1', '10.00')]);
+    await svc.handleInbound(replyEvent('1', 555), group, 'telegram:eudes');
+    expect(ws.payCard).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers a stuck submitting attempt on the next poll', async () => {
+    const st = baseState();
+    st.seen.p1 = { st: 'notified', amount: 1000, merchant: 'Loja', at: '2026-11-09T12:00:00Z' };
+    st.offers.push({
+      id: 'o1',
+      purchaseKey: 'p1',
+      messageOutId: 'out-1',
+      telegramMessageId: 555,
+      merchant: 'Loja',
+      amountCents: 1000,
+      currency: 'CAD',
+      accounts: [{ num: 1, accountId: 'ca-1', name: 'Geral', balanceCents: 100000, observedAt: '12:00' }],
+      createdAt: '2026-11-10T11:00:00.000Z',
+      state: 'paying',
+    });
+    st.attempts.push({
+      offerId: 'o1',
+      userId: 'telegram:eudes',
+      accountId: 'ca-1',
+      amountCents: 1000,
+      idempotencyKey: 'k-1',
+      state: 'submitting',
+      at: '2026-11-10T11:05:00.000Z',
+    });
+    saveState(st);
+
+    const ws = makeWs({ fetchActivities: vi.fn(async () => [purchase('p1', '10.00')]) });
+    await createCardPayService(makeDeps(ws)).pollOnce();
+
+    const s = loadState();
+    expect(s.attempts[0].state).toBe('unknown');
+    expect(s.offers[0].state).toBe('blocked');
+    expect(sent.some((m) => m.text.toLowerCase().includes('incerto'))).toBe(true);
+  });
 });
 
 describe('handleInbound', () => {
@@ -212,7 +288,9 @@ describe('handleInbound', () => {
     saveState(baseState());
     const ws = makeWs({ fetchActivities: vi.fn(async () => [purchase('p1', '10.00')]) });
     const { svc } = await notifiedService(ws);
-    expect(await svc.handleInbound(replyEvent('2', 555), { platform_id: 'telegram:-200', is_group: 1 }, 'telegram:eudes')).toBe(false);
+    expect(
+      await svc.handleInbound(replyEvent('2', 555), { platform_id: 'telegram:-200', is_group: 1 }, 'telegram:eudes'),
+    ).toBe(false);
   });
 
   it('pays on a valid number without requiring a mention', async () => {
@@ -221,7 +299,12 @@ describe('handleInbound', () => {
     const { svc } = await notifiedService(ws);
     expect(await svc.handleInbound(replyEvent('1', 555), group, 'telegram:eudes')).toBe(true);
     expect(ws.payCard).toHaveBeenCalledWith(
-      expect.objectContaining({ amountCents: 4250, cashAccountId: 'ca-1', creditAccountId: 'card-1', profile: 'eudes' }),
+      expect.objectContaining({
+        amountCents: 4250,
+        cashAccountId: 'ca-1',
+        creditAccountId: 'card-1',
+        profile: 'eudes',
+      }),
     );
     const s = loadState();
     expect(s.seen.p1.st).toBe('paid');

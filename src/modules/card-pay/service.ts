@@ -1,6 +1,7 @@
 import { processActivities, dollars, type Activity, type NewPurchase } from './domain.js';
 import { loadState, saveState, type CardPayState, type Offer } from './state.js';
 import type { WsClient } from './wealthsimple.js';
+import { log } from '../../log.js';
 
 const WINDOW_DAYS = 14;
 const OFFER_TTL_MS = 24 * 3600 * 1000;
@@ -27,8 +28,12 @@ export interface GroupLike {
 
 const torontoDate = (iso: string): { day: string; time: string } => {
   const d = new Date(iso);
-  const fmt = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Toronto', ...opts }).format(d);
-  return { day: fmt({ day: '2-digit', month: '2-digit' }), time: fmt({ hour: '2-digit', minute: '2-digit', hour12: false }) };
+  const fmt = (opts: Intl.DateTimeFormatOptions) =>
+    new Intl.DateTimeFormat('pt-BR', { timeZone: 'America/Toronto', ...opts }).format(d);
+  return {
+    day: fmt({ day: '2-digit', month: '2-digit' }),
+    time: fmt({ hour: '2-digit', minute: '2-digit', hour12: false }),
+  };
 };
 
 function fmtOffer(p: NewPurchase, accounts: Offer['accounts'], observedAt: string): string {
@@ -39,7 +44,10 @@ function fmtOffer(p: NewPurchase, accounts: Offer['accounts'], observedAt: strin
     `${day} às ${time}`,
     '',
     'Pagar com saldo — responda a esta mensagem com o número da conta:',
-    ...accounts.map((a) => `  ${a.num}) ${a.name} — ${a.balanceCents === null ? 'saldo indisponível' : `disponível $${dollars(a.balanceCents)}`}`),
+    ...accounts.map(
+      (a) =>
+        `  ${a.num}) ${a.name} — ${a.balanceCents === null ? 'saldo indisponível' : `disponível $${dollars(a.balanceCents)}`}`,
+    ),
     '',
     `Saldos consultados às ${observedAt}.`,
   ];
@@ -113,9 +121,22 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
     state.offers.push(offer);
   }
 
-  async function pollOnce(): Promise<void> {
+  async function pollOnceLocked(): Promise<void> {
     const state = loadState();
     if (!state.config.enabled) return;
+
+    for (const attempt of state.attempts) {
+      if (attempt.state !== 'submitting') continue;
+      attempt.state = 'unknown';
+      const offer = state.offers.find((o) => o.id === attempt.offerId);
+      if (offer && offer.state === 'paying') {
+        offer.state = 'blocked';
+        await sendToUser(
+          `⚠️ Resultado incerto no pagamento de $${dollars(attempt.amountCents)} (reiniciei durante o envio). Não repeti o pagamento — verifico manualmente antes de qualquer nova tentativa.`,
+        );
+      }
+      saveState(state);
+    }
 
     const startDate = new Date(deps.now() - WINDOW_DAYS * 864e5).toISOString().replace(/\.\d{3}Z$/, 'Z');
     let rows: Activity[];
@@ -127,7 +148,9 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
         if (!state.authAlerted) {
           state.authAlerted = true;
           saveState(state);
-          await sendToUser('⚠️ Consulta do cartão pausada: Wealthsimple precisa de nova autenticação. Me avise quando quiser refazer o login.');
+          await sendToUser(
+            '⚠️ Consulta do cartão pausada: Wealthsimple precisa de nova autenticação. Me avise quando quiser refazer o login.',
+          );
           return;
         }
         saveState(state);
@@ -137,7 +160,9 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
       if (state.failStreak >= FAIL_ALERT_STREAK && !state.failAlerted) {
         state.failAlerted = true;
         saveState(state);
-        await sendToUser(`⚠️ A consulta do cartão falhou ${state.failStreak} vezes seguidas: ${(e as Error).message?.slice(0, 200)}`);
+        await sendToUser(
+          `⚠️ A consulta do cartão falhou ${state.failStreak} vezes seguidas: ${(e as Error).message?.slice(0, 200)}`,
+        );
         return;
       }
       saveState(state);
@@ -182,13 +207,22 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
   }
 
   function parseContent(content: unknown): { text: string; replyToMessageId: number | null } {
-    const c = typeof content === 'string' ? (JSON.parse(content) as Record<string, unknown>) : (content as Record<string, unknown>);
+    const c =
+      typeof content === 'string'
+        ? (JSON.parse(content) as Record<string, unknown>)
+        : (content as Record<string, unknown>);
     const replyTo = c?.replyTo as { messageId?: number } | undefined;
     return { text: typeof c?.text === 'string' ? c.text : '', replyToMessageId: replyTo?.messageId ?? null };
   }
 
-  async function handleInbound(event: InboundLike, mg: GroupLike, userId: string | null): Promise<boolean> {
-    const state = loadState();
+  async function handleInboundLocked(event: InboundLike, mg: GroupLike, userId: string | null): Promise<boolean> {
+    let state: CardPayState;
+    try {
+      state = loadState();
+    } catch (err) {
+      log.error('card-pay: state file unreadable — inbound pass-through', { err });
+      return false;
+    }
     if (!state.config.enabled) return false;
     if (event.channelType !== 'telegram') return false;
     if (mg.platform_id !== state.config.chatPlatformId || mg.is_group === 0) return false;
@@ -251,7 +285,9 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
     }
     if (balance < offer.amountCents) {
       offer.state = 'active';
-      return fail(`Saldo insuficiente em ${account.name} (disponível $${dollars(balance)}). Responda com outro número.`);
+      return fail(
+        `Saldo insuficiente em ${account.name} (disponível $${dollars(balance)}). Responda com outro número.`,
+      );
     }
 
     const attempt = {
@@ -279,7 +315,9 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
       offer.state = 'paid';
       seen.st = 'paid';
       saveState(state);
-      await sendToUser(`✅ Wealthsimple aceitou o pagamento de $${dollars(offer.amountCents)} da conta ${account.name} (${offer.merchant}).`);
+      await sendToUser(
+        `✅ Wealthsimple aceitou o pagamento de $${dollars(offer.amountCents)} da conta ${account.name} (${offer.merchant}).`,
+      );
       return true;
     }
     if (outcome.outcome === 'rejected') {
@@ -293,7 +331,9 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
       attempt.state = 'unknown';
       offer.state = 'active';
       saveState(state);
-      await sendToUser('⚠️ Wealthsimple pediu reautenticação — o pagamento NÃO foi enviado. Refaça o login e responda de novo.');
+      await sendToUser(
+        '⚠️ Wealthsimple pediu reautenticação — o pagamento NÃO foi enviado. Refaça o login e responda de novo.',
+      );
       return true;
     }
     attempt.state = 'unknown';
@@ -305,5 +345,15 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
     return true;
   }
 
-  return { pollOnce, handleInbound };
+  let queue: Promise<unknown> = Promise.resolve();
+  function withLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = queue.then(fn, fn);
+    queue = run.catch(() => undefined);
+    return run;
+  }
+
+  return {
+    pollOnce: () => withLock(pollOnceLocked),
+    handleInbound: (event, mg, userId) => withLock(() => handleInboundLocked(event, mg, userId)),
+  };
 }

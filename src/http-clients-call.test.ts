@@ -32,12 +32,24 @@ describe('callHttpClients', () => {
     expect(result.status).toBe('ok');
     const [bin, args] = spawnMock.mock.calls[0];
     expect(String(bin).length).toBeGreaterThan(0);
-    expect(args).toEqual(['wealthsimple', 'fetch-credit-card-activities', '--credit-account-id', 'card-1', '--profile', 'eudes']);
+    expect(args).toEqual([
+      'wealthsimple',
+      'fetch-credit-card-activities',
+      '--credit-account-id',
+      'card-1',
+      '--profile',
+      'eudes',
+    ]);
   });
 
   it('propagates CLI errors as classified envelopes', async () => {
     spawnMock.mockReturnValue(fakeProc('', 'boom', 1));
-    const result = (await callHttpClients({ service: 'wealthsimple', command: 'credit-card-payment', args: {}, raw: true })) as {
+    const result = (await callHttpClients({
+      service: 'wealthsimple',
+      command: 'credit-card-payment',
+      args: {},
+      raw: true,
+    })) as {
       status: string;
       code?: string;
     };

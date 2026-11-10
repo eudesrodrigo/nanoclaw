@@ -47,9 +47,9 @@ const service = createCardPayService({
     try {
       const db = openInboundDb(target.agentGroupId, target.sessionId);
       try {
-        const row = db.prepare('SELECT platform_message_id FROM delivered WHERE message_out_id = ?').get(messageOutId) as
-          | { platform_message_id: string | null }
-          | undefined;
+        const row = db
+          .prepare('SELECT platform_message_id FROM delivered WHERE message_out_id = ?')
+          .get(messageOutId) as { platform_message_id: string | null } | undefined;
         return row?.platform_message_id ? Number(row.platform_message_id) : null;
       } finally {
         db.close();

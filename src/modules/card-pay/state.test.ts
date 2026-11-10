@@ -27,7 +27,13 @@ describe('loadState', () => {
 
   it('returns parsed state when the file exists', () => {
     const s: CardPayState = {
-      config: { enabled: true, chatPlatformId: 'telegram:-100', approverIds: ['telegram:1'], cardId: 'card-1', profile: 'eudes' },
+      config: {
+        enabled: true,
+        chatPlatformId: 'telegram:-100',
+        approverIds: ['telegram:1'],
+        cardId: 'card-1',
+        profile: 'eudes',
+      },
       seen: { root1: { st: 'notified', amount: 100, merchant: 'M', at: '2026-11-01T00:00:00Z' } },
       consumedPayments: [],
       offers: [],

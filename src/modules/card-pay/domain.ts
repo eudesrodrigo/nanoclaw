@@ -80,7 +80,7 @@ export function processActivities(state: CardPayState, rows: Activity[], firstRu
       (s) => s.st === 'notified' && s.amount === cents(p.amount) && ts(s.at) <= ts(p.occurred_at),
     );
     if (match) {
-      match.st = 'paid';
+      match.st = 'inferred_paid';
       consumed.add(rootId(p.id));
       paidMarked.push({ merchant: match.merchant, amount: dollars(match.amount) });
     }

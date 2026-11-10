@@ -50,7 +50,9 @@ describe('fetchCashAccounts', () => {
   });
 
   it('falls back to nickname/account_id field names', async () => {
-    const { client } = makeClient(async () => ok([{ account_id: 'ca-9', nickname: 'Geral', account_type: 'CASH', currency: 'CAD', status: 'active' }]));
+    const { client } = makeClient(async () =>
+      ok([{ account_id: 'ca-9', nickname: 'Geral', account_type: 'CASH', currency: 'CAD', status: 'active' }]),
+    );
     expect(await client.fetchCashAccounts('eudes')).toEqual([{ id: 'ca-9', name: 'Geral' }]);
   });
 });
@@ -71,26 +73,45 @@ describe('fetchWithdrawableCents', () => {
     expect(call).toHaveBeenCalledWith({
       service: 'wealthsimple',
       command: 'fetch-accounts-withdrawable-balances',
-      args: { 'account-ids': ['ca-1', 'ca-2'], 'destination-id': 'card-1', 'destination-type': 'Account', profile: 'eudes' },
+      args: {
+        'account-ids': ['ca-1', 'ca-2'],
+        'destination-id': 'card-1',
+        'destination-type': 'Account',
+        profile: 'eudes',
+      },
       raw: true,
     });
   });
 
   it('reports unknown balances as null instead of zero', async () => {
     const { client } = makeClient(async () => ok([{ account_id: 'ca-1' }]));
-    expect(await client.fetchWithdrawableCents(['ca-1'], 'card-1', 'eudes')).toEqual([{ accountId: 'ca-1', cents: null }]);
+    expect(await client.fetchWithdrawableCents(['ca-1'], 'card-1', 'eudes')).toEqual([
+      { accountId: 'ca-1', cents: null },
+    ]);
   });
 });
 
 describe('payCard', () => {
   it('sends the mutation with amount cents and idempotency key', async () => {
     const { client, call } = makeClient(async () => ok({ success: true, errors: [] }));
-    const outcome = await client.payCard({ amountCents: 1999, cashAccountId: 'ca-1', creditAccountId: 'card-1', idempotencyKey: 'k-1', profile: 'eudes' });
+    const outcome = await client.payCard({
+      amountCents: 1999,
+      cashAccountId: 'ca-1',
+      creditAccountId: 'card-1',
+      idempotencyKey: 'k-1',
+      profile: 'eudes',
+    });
     expect(outcome.outcome).toBe('accepted');
     expect(call).toHaveBeenCalledWith({
       service: 'wealthsimple',
       command: 'credit-card-payment',
-      args: { 'amount-cents': 1999, 'cash-account-id': 'ca-1', 'credit-account-id': 'card-1', 'idempotency-key': 'k-1', profile: 'eudes' },
+      args: {
+        'amount-cents': 1999,
+        'cash-account-id': 'ca-1',
+        'credit-account-id': 'card-1',
+        'idempotency-key': 'k-1',
+        profile: 'eudes',
+      },
       raw: true,
     });
   });
@@ -101,7 +122,13 @@ describe('payCard', () => {
     [err('transient', 'timeout'), 'unknown'],
   ])('classifies %o as %s', async (envelope, expected) => {
     const { client } = makeClient(async () => envelope);
-    const outcome = await client.payCard({ amountCents: 1, cashAccountId: 'ca', creditAccountId: 'card', idempotencyKey: 'k', profile: 'eudes' });
+    const outcome = await client.payCard({
+      amountCents: 1,
+      cashAccountId: 'ca',
+      creditAccountId: 'card',
+      idempotencyKey: 'k',
+      profile: 'eudes',
+    });
     expect(outcome.outcome).toBe(expected);
   });
 
@@ -109,6 +136,16 @@ describe('payCard', () => {
     const { client } = makeClient(async () => {
       throw new Error('spawn ENOENT');
     });
-    expect((await client.payCard({ amountCents: 1, cashAccountId: 'ca', creditAccountId: 'card', idempotencyKey: 'k', profile: 'eudes' })).outcome).toBe('unknown');
+    expect(
+      (
+        await client.payCard({
+          amountCents: 1,
+          cashAccountId: 'ca',
+          creditAccountId: 'card',
+          idempotencyKey: 'k',
+          profile: 'eudes',
+        })
+      ).outcome,
+    ).toBe('unknown');
   });
 });

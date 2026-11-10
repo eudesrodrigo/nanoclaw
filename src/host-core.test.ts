@@ -290,7 +290,13 @@ describe('router', () => {
       channelType: 'discord',
       platformId: 'chan-123',
       threadId: null,
-      message: { id: 'msg-a', kind: 'chat', content: JSON.stringify({ sender: 'A', text: 'First' }), timestamp: now(), isMention: true },
+      message: {
+        id: 'msg-a',
+        kind: 'chat',
+        content: JSON.stringify({ sender: 'A', text: 'First' }),
+        timestamp: now(),
+        isMention: true,
+      },
     });
 
     await routeInbound({
@@ -346,7 +352,13 @@ describe('router', () => {
       channelType: 'discord',
       platformId: 'chan-123',
       threadId: null,
-      message: { id: 'msg-fan', kind: 'chat', content: JSON.stringify({ text: 'hello all' }), timestamp: now(), isMention: true },
+      message: {
+        id: 'msg-fan',
+        kind: 'chat',
+        content: JSON.stringify({ text: 'hello all' }),
+        timestamp: now(),
+        isMention: true,
+      },
     });
 
     // Both agents should now have their own session and be woken.

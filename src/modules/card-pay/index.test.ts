@@ -30,4 +30,18 @@ describe('card-pay wiring', () => {
     );
     expect(claimed).toBe(false);
   });
+
+  it('returns false instead of throwing when the state file is corrupt', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'state.json'), '{corrupt');
+    const { tryCardPayInbound } = await import('./index.js');
+    const claimed = await tryCardPayInbound(
+      {
+        channelType: 'telegram',
+        message: { content: { text: '1', replyTo: { text: 'aviso', sender: 'bot', messageId: 555 } } },
+      },
+      { platform_id: 'telegram:-100', is_group: 1 },
+      'telegram:eudes',
+    );
+    expect(claimed).toBe(false);
+  });
 });
