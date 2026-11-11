@@ -3,7 +3,7 @@ import path from 'node:path';
 import { DATA_DIR } from '../../config.js';
 
 export interface SeenEntry {
-  st: 'seeded' | 'notified' | 'paid' | 'inferred_paid';
+  st: 'seeded' | 'notified' | 'paid' | 'inferred_paid' | 'blocked';
   amount: number;
   merchant: string;
   at: string;
@@ -37,6 +37,7 @@ export interface PaymentAttempt {
   amountCents: number;
   idempotencyKey: string;
   state: 'submitting' | 'accepted' | 'rejected' | 'unknown';
+  confirmDelivered?: boolean;
   at: string;
 }
 

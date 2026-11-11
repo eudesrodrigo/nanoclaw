@@ -43,6 +43,7 @@ export interface DeliveryAddress {
  * set only by external adapters carrying operator intent.
  */
 export interface InboundEvent {
+  sourceChannelType?: string;
   channelType: string;
   platformId: string;
   threadId: string | null;

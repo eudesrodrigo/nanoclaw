@@ -30,7 +30,7 @@ function baseState(overrides: Partial<CardPayState> = {}): CardPayState {
     config: {
       enabled: true,
       chatPlatformId: 'telegram:-100',
-      approverIds: ['telegram:eudes', 'telegram:magda'],
+      approverIds: ['telegram:123', 'telegram:456'],
       cardId: 'card-1',
       profile: 'eudes',
     },
@@ -71,9 +71,10 @@ function makeDeps(ws: WsClient): CardPayDeps {
 }
 
 const group = { platform_id: 'telegram:-100', is_group: 1 };
-const replyEvent = (text: string, messageId: number, senderId = 'telegram:eudes') => ({
+const replyEvent = (text: string, messageId: number, senderId = 'telegram:123') => ({
   channelType: 'telegram',
-  message: { content: { text, senderId, replyTo: { text: 'aviso', sender: 'bot', messageId } } },
+  sourceChannelType: 'telegram',
+  message: { content: { text, senderId, telegramPayment: { senderId: senderId.replace('telegram:', ''), eligible: true }, replyTo: { text: 'aviso', sender: 'bot', messageId } } },
 });
 
 beforeEach(() => {
@@ -209,7 +210,7 @@ describe('pollOnce', () => {
     (ws.fetchActivities as ReturnType<typeof vi.fn>).mockImplementation(() => fetchGate);
 
     const poll = svc.pollOnce();
-    const reply = svc.handleInbound(replyEvent('1', 555), group, 'telegram:eudes');
+    const reply = svc.handleInbound(replyEvent('1', 555), group, 'telegram:123');
     releaseFetch([purchase('p1', '10.00')]);
     await Promise.all([poll, reply]);
 
@@ -220,7 +221,7 @@ describe('pollOnce', () => {
     expect(s.attempts[0].state).toBe('accepted');
 
     (ws.fetchActivities as ReturnType<typeof vi.fn>).mockResolvedValue([purchase('p1', '10.00')]);
-    await svc.handleInbound(replyEvent('1', 555), group, 'telegram:eudes');
+    await svc.handleInbound(replyEvent('1', 555), group, 'telegram:123');
     expect(ws.payCard).toHaveBeenCalledTimes(1);
   });
 
@@ -241,7 +242,7 @@ describe('pollOnce', () => {
     });
     st.attempts.push({
       offerId: 'o1',
-      userId: 'telegram:eudes',
+      userId: 'telegram:123',
       accountId: 'ca-1',
       amountCents: 1000,
       idempotencyKey: 'k-1',
@@ -278,10 +279,10 @@ describe('handleInbound', () => {
       await svc.handleInbound(
         { channelType: 'telegram', message: { content: { text: '2' } } },
         group,
-        'telegram:eudes',
+        'telegram:123',
       ),
     ).toBe(false);
-    expect(await svc.handleInbound(replyEvent('2', 999), group, 'telegram:eudes')).toBe(false);
+    expect(await svc.handleInbound(replyEvent('2', 999), group, 'telegram:123')).toBe(false);
   });
 
   it('ignores messages from other chats', async () => {
@@ -289,7 +290,7 @@ describe('handleInbound', () => {
     const ws = makeWs({ fetchActivities: vi.fn(async () => [purchase('p1', '10.00')]) });
     const { svc } = await notifiedService(ws);
     expect(
-      await svc.handleInbound(replyEvent('2', 555), { platform_id: 'telegram:-200', is_group: 1 }, 'telegram:eudes'),
+      await svc.handleInbound(replyEvent('2', 555), { platform_id: 'telegram:-200', is_group: 1 }, 'telegram:123'),
     ).toBe(false);
   });
 
@@ -297,7 +298,7 @@ describe('handleInbound', () => {
     saveState(baseState());
     const ws = makeWs({ fetchActivities: vi.fn(async () => [purchase('p1', '42.50', 'Farmácia')]) });
     const { svc } = await notifiedService(ws);
-    expect(await svc.handleInbound(replyEvent('1', 555), group, 'telegram:eudes')).toBe(true);
+    expect(await svc.handleInbound(replyEvent('1', 555), group, 'telegram:123')).toBe(true);
     expect(ws.payCard).toHaveBeenCalledWith(
       expect.objectContaining({
         amountCents: 4250,
@@ -320,7 +321,7 @@ describe('handleInbound', () => {
     saveState(baseState());
     const ws = makeWs({ fetchActivities: vi.fn(async () => [purchase('p1', '10.00')]) });
     const { svc } = await notifiedService(ws);
-    expect(await svc.handleInbound(replyEvent('1', 555, 'telegram:magda'), group, 'telegram:magda')).toBe(true);
+    expect(await svc.handleInbound(replyEvent('1', 555, 'telegram:456'), group, 'telegram:456')).toBe(true);
     expect(ws.payCard).toHaveBeenCalledTimes(1);
   });
 
@@ -328,7 +329,7 @@ describe('handleInbound', () => {
     saveState(baseState());
     const ws = makeWs({ fetchActivities: vi.fn(async () => [purchase('p1', '10.00')]) });
     const { svc } = await notifiedService(ws);
-    expect(await svc.handleInbound(replyEvent('1', 555, 'telegram:stranger'), group, 'telegram:stranger')).toBe(true);
+    expect(await svc.handleInbound(replyEvent('1', 555, 'telegram:999'), group, 'telegram:999')).toBe(true);
     expect(ws.payCard).not.toHaveBeenCalled();
     expect(sent.at(-1)!.text.toLowerCase()).toContain('eudes');
     expect(loadState().seen.p1.st).toBe('notified');
@@ -338,8 +339,8 @@ describe('handleInbound', () => {
     saveState(baseState());
     const ws = makeWs({ fetchActivities: vi.fn(async () => [purchase('p1', '10.00')]) });
     const { svc } = await notifiedService(ws);
-    expect(await svc.handleInbound(replyEvent('abc', 555), group, 'telegram:eudes')).toBe(true);
-    expect(await svc.handleInbound(replyEvent('9', 555), group, 'telegram:eudes')).toBe(true);
+    expect(await svc.handleInbound(replyEvent('abc', 555), group, 'telegram:123')).toBe(true);
+    expect(await svc.handleInbound(replyEvent('9', 555), group, 'telegram:123')).toBe(true);
     expect(ws.payCard).not.toHaveBeenCalled();
     expect(loadState().offers[0].state).toBe('active');
   });
@@ -351,7 +352,7 @@ describe('handleInbound', () => {
       fetchWithdrawableCents: vi.fn(async () => [{ accountId: 'ca-1', cents: 5000 }]),
     });
     const { svc } = await notifiedService(ws);
-    expect(await svc.handleInbound(replyEvent('1', 555), group, 'telegram:eudes')).toBe(true);
+    expect(await svc.handleInbound(replyEvent('1', 555), group, 'telegram:123')).toBe(true);
     expect(ws.payCard).not.toHaveBeenCalled();
     expect(sent.at(-1)!.text.toLowerCase()).toContain('saldo insuficiente');
   });
@@ -363,7 +364,7 @@ describe('handleInbound', () => {
       fetchWithdrawableCents: vi.fn(async () => [{ accountId: 'ca-1', cents: null }]),
     });
     const { svc } = await notifiedService(ws);
-    expect(await svc.handleInbound(replyEvent('1', 555), group, 'telegram:eudes')).toBe(true);
+    expect(await svc.handleInbound(replyEvent('1', 555), group, 'telegram:123')).toBe(true);
     expect(ws.payCard).not.toHaveBeenCalled();
     expect(sent.at(-1)!.text.toLowerCase()).toContain('saldo');
   });
@@ -377,8 +378,8 @@ describe('handleInbound', () => {
       payCard: vi.fn(() => gate),
     });
     const { svc } = await notifiedService(ws);
-    const first = svc.handleInbound(replyEvent('1', 555), group, 'telegram:eudes');
-    const second = svc.handleInbound(replyEvent('1', 555), group, 'telegram:magda');
+    const first = svc.handleInbound(replyEvent('1', 555), group, 'telegram:123');
+    const second = svc.handleInbound(replyEvent('1', 555), group, 'telegram:456');
     release({ outcome: 'accepted' });
     await Promise.all([first, second]);
     expect(ws.payCard).toHaveBeenCalledTimes(1);
@@ -392,12 +393,12 @@ describe('handleInbound', () => {
       payCard: vi.fn(async () => ({ outcome: 'unknown', reason: 'timeout' }) as const),
     });
     const { svc } = await notifiedService(ws);
-    await svc.handleInbound(replyEvent('1', 555), group, 'telegram:eudes');
-    expect(sent.at(-1)!.text.toLowerCase()).toContain('verific');
+    await svc.handleInbound(replyEvent('1', 555), group, 'telegram:123');
+    expect(sent.at(-1)!.text.toLowerCase()).toContain('verifique');
     const s = loadState();
     expect(s.offers[0].state).toBe('blocked');
     expect(s.attempts[0].state).toBe('unknown');
-    await svc.handleInbound(replyEvent('1', 555), group, 'telegram:eudes');
+    await svc.handleInbound(replyEvent('1', 555), group, 'telegram:123');
     expect(ws.payCard).toHaveBeenCalledTimes(1);
   });
 
@@ -408,7 +409,7 @@ describe('handleInbound', () => {
       payCard: vi.fn(async () => ({ outcome: 'rejected', reason: 'refused: insufficient funds' }) as const),
     });
     const { svc } = await notifiedService(ws);
-    await svc.handleInbound(replyEvent('1', 555), group, 'telegram:eudes');
+    await svc.handleInbound(replyEvent('1', 555), group, 'telegram:123');
     expect(sent.at(-1)!.text.toLowerCase()).toContain('recusado');
     expect(loadState().offers[0].state).toBe('active');
   });
@@ -419,7 +420,7 @@ describe('handleInbound', () => {
     const { svc } = await notifiedService(ws);
     nowMs += 25 * 3600 * 1000;
     await svc.pollOnce();
-    expect(await svc.handleInbound(replyEvent('1', 555), group, 'telegram:eudes')).toBe(true);
+    expect(await svc.handleInbound(replyEvent('1', 555), group, 'telegram:123')).toBe(true);
     expect(ws.payCard).not.toHaveBeenCalled();
     expect(sent.at(-1)!.text.toLowerCase()).toContain('expirad');
   });

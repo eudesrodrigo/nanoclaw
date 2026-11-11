@@ -23,33 +23,25 @@ interface CallFn {
   }): Promise<object>;
 }
 
-function unwrapProfileRows(data: unknown): unknown[] {
+function unwrapProfileRows(data: unknown, profile: string): unknown[] {
   let rows = data;
   if (rows && !Array.isArray(rows) && typeof rows === 'object') {
-    const rec = rows as Record<string, unknown>;
-    if (Array.isArray(rec.results)) rows = rec.results;
-    else {
-      const keyed = Object.values(rec).find(Array.isArray);
-      if (keyed) rows = keyed;
+    const envelope = rows as Record<string, unknown>;
+    const errors = envelope.errors as Record<string, unknown> | undefined;
+    if (errors?.[profile]) throw new Error('Profile query failed');
+    rows = envelope.results ?? envelope;
+    if (rows && !Array.isArray(rows) && typeof rows === 'object') {
+      rows = (rows as Record<string, unknown>)[profile];
     }
   }
   if (!Array.isArray(rows)) throw Object.assign(new Error('unexpected shape from http-clients'), { code: 'bad_shape' });
-  return rows as unknown[];
+  return rows;
 }
 
 const firstString = (rec: Record<string, unknown>, keys: string[]): string | null => {
   for (const k of keys) {
     const v = rec[k];
     if (typeof v === 'string' && v) return v;
-  }
-  return null;
-};
-
-const firstNumber = (rec: Record<string, unknown>, keys: string[]): number | null => {
-  for (const k of keys) {
-    const v = rec[k];
-    if (typeof v === 'number' && Number.isFinite(v)) return v;
-    if (typeof v === 'string' && v !== '' && Number.isFinite(Number(v))) return Number(v);
   }
   return null;
 };
@@ -76,7 +68,7 @@ export function createWsClient(call: CallFn): WsClient {
       })) as { status?: string; code?: string; message?: string; data?: unknown };
       if (res.status !== 'ok')
         throw Object.assign(new Error(res.message || res.code || 'fetch failed'), { code: res.code });
-      return unwrapProfileRows(res.data) as Activity[];
+      return unwrapProfileRows(res.data, profile) as Activity[];
     },
 
     async fetchCashAccounts(profile) {
@@ -93,16 +85,22 @@ export function createWsClient(call: CallFn): WsClient {
       };
       if (res.status !== 'ok')
         throw Object.assign(new Error(res.message || res.code || 'fetch failed'), { code: res.code });
-      const rows = unwrapProfileRows(res.data) as Record<string, unknown>[];
+      const rows = unwrapProfileRows(res.data, profile) as Record<string, unknown>[];
       return rows
-        .map((r) => ({
-          id: firstString(r, ['id', 'account_id', 'accountId']),
-          name: firstString(r, ['name', 'nickname', 'display_name']),
-          type: (firstString(r, ['type', 'account_type']) ?? '').toUpperCase(),
-          currency: (firstString(r, ['currency']) ?? '').toUpperCase(),
-          status: (firstString(r, ['status', 'state']) ?? '').toUpperCase(),
-        }))
-        .filter((a) => a.id && a.type === 'CASH' && a.currency === 'CAD' && a.status !== 'CLOSED')
+        .map((outer) => {
+          const r = (typeof outer.node === 'object' && outer.node !== null
+            ? outer.node
+            : outer) as Record<string, unknown>;
+          const status = (firstString(r, ['status', 'state']) ?? '').toUpperCase();
+          return {
+            id: firstString(r, ['id', 'account_id', 'accountId']),
+            name: firstString(r, ['name', 'nickname', 'display_name']),
+            type: (firstString(r, ['unified_account_type', 'type', 'account_type']) ?? '').toUpperCase(),
+            currency: (firstString(r, ['currency']) ?? '').toUpperCase(),
+            closed: r.is_open === false || !(['OPEN', 'ACTIVE'].includes(status) || (!status && r.is_open === true)),
+          };
+        })
+        .filter((a) => a.id && a.type === 'CASH' && a.currency === 'CAD' && !a.closed)
         .map((a) => ({ id: a.id as string, name: a.name ?? (a.id as string) }));
     },
 
@@ -115,15 +113,25 @@ export function createWsClient(call: CallFn): WsClient {
       })) as { status?: string; code?: string; message?: string; data?: unknown };
       if (res.status !== 'ok')
         throw Object.assign(new Error(res.message || res.code || 'fetch failed'), { code: res.code });
-      const rows = unwrapProfileRows(res.data) as Record<string, unknown>[];
-      return rows.map((r) => ({
-        accountId: firstString(r, ['account_id', 'accountId', 'id']) ?? '',
-        cents: firstNumber(r, ['money_out_amount_cents', 'amount_cents', 'withdrawable_cents', 'balance_cents']),
-      }));
+      const rows = unwrapProfileRows(res.data, profile) as Record<string, unknown>[];
+      const decimalToCents = (v: unknown): number | null => {
+        const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN;
+        return typeof v === 'string' && !/^\d+(?:\.\d{1,2})?$/.test(v) ? null : Number.isFinite(n) && n >= 0 && Number.isSafeInteger(Math.round(n * 100)) ? Math.round(n * 100) : null;
+      };
+      return rows.map((r) => {
+        const policy = (r.funding_flow_policy ?? {}) as Record<string, unknown>;
+        const balances = (policy.money_out_balances ?? []) as Array<Record<string, unknown>>;
+        const cad = balances.find((b) => String(b.currency).toUpperCase() === 'CAD');
+        const disabled = policy.withdrawal_enabled !== true;
+        return {
+          accountId: firstString(r, ['account_id', 'accountId', 'id']) ?? '',
+          cents: disabled ? null : decimalToCents(cad?.amount),
+        };
+      });
     },
 
     async payCard(input) {
-      let res: { status?: string; code?: string; message?: string };
+      let res: { status?: string; code?: string; message?: string; data?: unknown };
       try {
         res = (await call({
           service: 'wealthsimple',
@@ -136,11 +144,19 @@ export function createWsClient(call: CallFn): WsClient {
             profile: input.profile,
           },
           raw: true,
-        })) as { status?: string; code?: string; message?: string };
+        })) as typeof res;
       } catch (e) {
         return { outcome: 'unknown', reason: e instanceof Error ? e.message : String(e) };
       }
-      if (res.status === 'ok') return { outcome: 'accepted' };
+      if (res.status === 'ok') {
+        const envelope = res.data as Record<string, unknown> | null;
+        const result = envelope && typeof envelope === 'object'
+          ? (envelope[input.profile] ?? envelope) as Record<string, unknown>
+          : null;
+        if (result?.success === true) return { outcome: 'accepted' };
+        if (result?.success === false) return { outcome: 'rejected', reason: 'Wealthsimple recusou o pagamento' };
+        return { outcome: 'unknown', reason: 'Resposta de pagamento sem confirmação explícita' };
+      }
       if (res.code === 'auth_required') return { outcome: 'auth' };
       const message = res.message ?? res.code ?? 'error';
       if (/refused/i.test(message)) return { outcome: 'rejected', reason: message };

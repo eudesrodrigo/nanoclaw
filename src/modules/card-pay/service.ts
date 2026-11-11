@@ -1,4 +1,4 @@
-import { processActivities, dollars, type Activity, type NewPurchase } from './domain.js';
+import { processActivities, dollars, cents, rootId, type Activity, type NewPurchase } from './domain.js';
 import { loadState, saveState, type CardPayState, type Offer } from './state.js';
 import type { WsClient } from './wealthsimple.js';
 import { log } from '../../log.js';
@@ -10,14 +10,16 @@ const FAIL_ALERT_STREAK = 8;
 
 export interface CardPayDeps {
   ws: WsClient;
-  send(text: string): Promise<string | null>;
+  send(text: string, context?: 'offer' | 'paymentResult'): Promise<string | null>;
   resolveTelegramMessageId(messageOutId: string): number | null;
   now(): number;
   uuid(): string;
+  retryPaymentResults?: boolean;
 }
 
 export interface InboundLike {
   channelType: string;
+  sourceChannelType?: string;
   message: { content: unknown };
 }
 
@@ -60,10 +62,24 @@ export interface CardPayService {
 }
 
 export function createCardPayService(deps: CardPayDeps): CardPayService {
-  const { ws, send } = deps;
+  const { ws, send, retryPaymentResults } = deps;
 
-  async function sendToUser(text: string): Promise<void> {
-    await send(text);
+  async function sendToUser(text: string, context?: 'offer' | 'paymentResult'): Promise<void> {
+    await send(text, context);
+  }
+  async function confirmPaymentResults(state: CardPayState): Promise<void> {
+    if (!retryPaymentResults) return;
+    for (const attempt of state.attempts) {
+      if (attempt.state !== 'accepted' || attempt.confirmDelivered === true) continue;
+      const offer = state.offers.find((o) => o.id === attempt.offerId);
+      await sendToUser(
+        `Confirmação anterior: Wealthsimple aceitou o pagamento de $${dollars(attempt.amountCents)}.` +
+          (offer ? ` (${offer.merchant})` : ''),
+        'paymentResult',
+      );
+      attempt.confirmDelivered = true;
+      saveState(state);
+    }
   }
 
   async function loadAccounts(state: CardPayState): Promise<Offer['accounts']> {
@@ -132,7 +148,7 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
       if (offer && offer.state === 'paying') {
         offer.state = 'blocked';
         await sendToUser(
-          `⚠️ Resultado incerto no pagamento de $${dollars(attempt.amountCents)} (reiniciei durante o envio). Não repeti o pagamento — verifico manualmente antes de qualquer nova tentativa.`,
+          `⚠️ Resultado incerto no pagamento de $${dollars(attempt.amountCents)} (reiniciei durante o envio). Não repeti o pagamento. Verifique no app antes de qualquer nova tentativa.`,
         );
       }
       saveState(state);
@@ -200,9 +216,16 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
     }
 
     for (const p of newPurchases) {
+      if (p.currency !== 'CAD' || !Number.isSafeInteger(p.amountCents) || p.amountCents <= 0) {
+        const seen = state.seen[p.key];
+        if (seen) seen.st = 'blocked';
+        await sendToUser(`🔔 Nova compra no cartão\n${p.merchant} — $${p.amount} ${p.currency}\n\nCompra fora das condições de pagamento automático. Pague manualmente no app.`);
+        continue;
+      }
       await createOffer(state, p);
     }
 
+    await confirmPaymentResults(state);
     saveState(state);
   }
 
@@ -244,8 +267,21 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
       return true;
     };
 
+    const content = typeof event.message.content === 'string' ? JSON.parse(event.message.content) : event.message.content;
+    const identity = content?.telegramPayment;
+    if (event.sourceChannelType !== 'telegram' || identity?.eligible !== true ||
+      !/^[1-9]\d*$/.test(identity?.senderId ?? '') || userId !== `telegram:${identity.senderId}`) {
+      return fail('A autorização precisa ser uma resposta original enviada pelo Telegram.');
+    }
     if (!userId || !state.config.approverIds.includes(userId)) {
       return fail('Só Eudes ou Magda podem autorizar pagamentos.');
+    }
+    if (offer.state === 'active' && (!Number.isFinite(Date.parse(offer.createdAt)) ||
+      deps.now() - Date.parse(offer.createdAt) >= OFFER_TTL_MS)) offer.state = 'expired';
+    if (!Number.isSafeInteger(offer.amountCents) || offer.amountCents <= 0 ||
+      offer.amountCents > MAX_PAYMENT_CENTS || offer.currency !== 'CAD') {
+      offer.state = 'blocked';
+      return fail('Compra fora das condições de pagamento automático. Pague manualmente no app.');
     }
     if (offer.state === 'paying') return fail('Pagamento em andamento — aguarde a confirmação.');
     if (offer.state === 'paid') return fail('Essa compra já foi paga.');
@@ -274,12 +310,32 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
 
     let balance: number | null;
     try {
+      const rows = await ws.fetchActivities(state.config.cardId, state.config.profile,
+        new Date(deps.now() - WINDOW_DAYS * 864e5).toISOString());
+      const matches = rows.filter((row) => row.type === 'purchase' && rootId(row.id) === offer.purchaseKey);
+      if (matches.length === 0 || matches.some((row) => row.status === 'reversed' ||
+        !['settled', 'pending', 'authorized', 'posted'].includes(row.status) ||
+        row.currency !== 'CAD' || cents(row.amount) !== offer.amountCents)) {
+        offer.state = 'invalidated';
+        return fail('Compra cancelada ou alterada. Esta autorização não pode ser usada.');
+      }
+      processActivities(state, rows, false);
+      const refreshed = state.seen[offer.purchaseKey];
+      if (refreshed?.st === 'paid' || refreshed?.st === 'inferred_paid') {
+        offer.state = 'paid';
+        return fail('Há um pagamento registrado para esta compra. Não enviei outro.');
+      }
+      const accounts = await ws.fetchCashAccounts(state.config.profile);
+      if (!accounts.some((item) => item.id === account.accountId)) {
+        offer.state = 'invalidated';
+        return fail('A conta escolhida não está disponível para pagamento.');
+      }
       const balances = await ws.fetchWithdrawableCents([account.accountId], state.config.cardId, state.config.profile);
       balance = balances.find((b) => b.accountId === account.accountId)?.cents ?? null;
     } catch {
       balance = null;
     }
-    if (balance === null) {
+    if (balance === null || !Number.isSafeInteger(balance) || balance < 0) {
       offer.state = 'active';
       return fail('Não consegui confirmar o saldo agora — tente de novo em alguns minutos.');
     }
@@ -290,13 +346,13 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
       );
     }
 
-    const attempt = {
+    const attempt: import('./state.js').PaymentAttempt = {
       offerId: offer.id,
       userId,
       accountId: account.accountId,
       amountCents: offer.amountCents,
       idempotencyKey: deps.uuid(),
-      state: 'submitting' as 'submitting' | 'accepted' | 'rejected' | 'unknown',
+      state: 'submitting',
       at: new Date(deps.now()).toISOString(),
     };
     state.attempts.push(attempt);
@@ -312,12 +368,21 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
 
     if (outcome.outcome === 'accepted') {
       attempt.state = 'accepted';
+      attempt.confirmDelivered = false;
       offer.state = 'paid';
       seen.st = 'paid';
       saveState(state);
-      await sendToUser(
-        `✅ Wealthsimple aceitou o pagamento de $${dollars(offer.amountCents)} da conta ${account.name} (${offer.merchant}).`,
-      );
+      try {
+        await sendToUser(
+          `✅ Wealthsimple aceitou o pagamento de $${dollars(offer.amountCents)} da conta ${account.name} (${offer.merchant}).`,
+          'paymentResult',
+        );
+        attempt.confirmDelivered = true;
+        saveState(state);
+      } catch {
+        attempt.confirmDelivered = false;
+        saveState(state);
+      }
       return true;
     }
     if (outcome.outcome === 'rejected') {
@@ -329,10 +394,10 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
     }
     if (outcome.outcome === 'auth') {
       attempt.state = 'unknown';
-      offer.state = 'active';
+      offer.state = 'blocked';
       saveState(state);
       await sendToUser(
-        '⚠️ Wealthsimple pediu reautenticação — o pagamento NÃO foi enviado. Refaça o login e responda de novo.',
+        '⚠️ Falha de autenticação durante o pagamento. Verifique no app antes de qualquer nova tentativa.',
       );
       return true;
     }
@@ -340,7 +405,7 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
     offer.state = 'blocked';
     saveState(state);
     await sendToUser(
-      `⚠️ Resultado incerto no pagamento de $${dollars(offer.amountCents)} (${outcome.reason}). Não repeti o pagamento — vou verificar manualmente antes de qualquer nova tentativa.`,
+      `⚠️ Resultado incerto no pagamento de $${dollars(offer.amountCents)} (${outcome.reason}). Não repeti o pagamento. Verifique no app antes de qualquer nova tentativa.`,
     );
     return true;
   }

@@ -93,6 +93,7 @@ async function main(): Promise<void> {
     return {
       onInbound(platformId, threadId, message) {
         routeInbound({
+          sourceChannelType: adapter.channelType,
           channelType: adapter.channelType,
           platformId,
           threadId,
@@ -109,7 +110,7 @@ async function main(): Promise<void> {
         });
       },
       onInboundEvent(event) {
-        routeInbound(event).catch((err) => {
+        routeInbound({ ...event, sourceChannelType: adapter.channelType }).catch((err) => {
           log.error('Failed to route inbound event', {
             sourceAdapter: adapter.channelType,
             targetChannelType: event.channelType,

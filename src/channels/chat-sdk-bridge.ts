@@ -1,3 +1,4 @@
+import { extractPaymentContext } from './telegram-reply.js';
 /**
  * Chat SDK bridge — wraps a Chat SDK adapter + Chat instance
  * to conform to the NanoClaw ChannelAdapter interface.
@@ -179,6 +180,9 @@ export function createChatSdkBridge(config: ChatSdkBridgeConfig): ChannelAdapter
     }
 
     // Drop raw to save DB space (can be very large)
+    if (adapter.name === 'telegram' && message.raw) {
+      serialized.telegramPayment = extractPaymentContext(message.raw as Record<string, unknown>);
+    }
     serialized.raw = undefined;
 
     return {

@@ -35,21 +35,25 @@ describe('fetchActivities', () => {
 });
 
 describe('fetchCashAccounts', () => {
-  it('keeps open CAD CASH accounts with stable ordering fields', async () => {
+  it('unwraps node envelopes and keeps open CAD CASH accounts', async () => {
     const { client } = makeClient(async () =>
       ok({
         eudes: [
-          { id: 'ca-1', name: '🛒 Mercado e Gas', type: 'CASH', currency: 'CAD', status: 'open' },
-          { id: 'inv-1', name: 'TFSA', type: 'INVESTMENT', currency: 'CAD', status: 'open' },
-          { id: 'usd-1', name: 'USD Cash', type: 'CASH', currency: 'USD', status: 'open' },
-          { id: 'closed-1', name: 'Velha', type: 'CASH', currency: 'CAD', status: 'closed' },
+          { node: { id: 'ca-1', nickname: '🛒 Mercado e Gas', unified_account_type: 'CASH', currency: 'CAD', status: 'open' } },
+          { node: { id: 'tfsa-1', nickname: 'Stocks', unified_account_type: 'SELF_DIRECTED_TFSA', currency: 'CAD', status: 'open' } },
+          { node: { id: 'usd-1', nickname: 'USD', unified_account_type: 'CASH', currency: 'USD', status: 'open' } },
+          { node: { id: 'closed-1', nickname: 'Velha', unified_account_type: 'CASH', currency: 'CAD', status: 'closed' } },
+          { node: { id: 'open-flag-1', nickname: 'Só is_open', unified_account_type: 'CASH', currency: 'CAD', is_open: true } },
         ],
       }),
     );
-    expect(await client.fetchCashAccounts('eudes')).toEqual([{ id: 'ca-1', name: '🛒 Mercado e Gas' }]);
+    const accounts = await client.fetchCashAccounts('eudes');
+    expect(accounts).toContainEqual({ id: 'ca-1', name: '🛒 Mercado e Gas' });
+    expect(accounts).toContainEqual({ id: 'open-flag-1', name: 'Só is_open' });
+    expect(accounts).toHaveLength(2);
   });
 
-  it('falls back to nickname/account_id field names', async () => {
+  it('still tolerates flat rows with legacy field names', async () => {
     const { client } = makeClient(async () =>
       ok([{ account_id: 'ca-9', nickname: 'Geral', account_type: 'CASH', currency: 'CAD', status: 'active' }]),
     );
@@ -58,17 +62,31 @@ describe('fetchCashAccounts', () => {
 });
 
 describe('fetchWithdrawableCents', () => {
-  it('maps account ids to cent balances', async () => {
+  it('parses decimal CAD money_out_balances into cents', async () => {
     const { client, call } = makeClient(async () =>
-      ok([
-        { account_id: 'ca-1', money_out_amount_cents: 123456 },
-        { account_id: 'ca-2', amount_cents: 500 },
-      ]),
+      ok({
+        eudes: [
+          {
+            id: 'ca-1',
+            funding_flow_policy: {
+              withdrawal_enabled: true,
+              money_out_balances: [{ amount: '758.67', currency: 'CAD' }],
+            },
+          },
+          {
+            id: 'ca-2',
+            funding_flow_policy: {
+              withdrawal_enabled: true,
+              money_out_balances: [{ amount: '0.01', currency: 'USD' }],
+            },
+          },
+        ],
+      }),
     );
     const out = await client.fetchWithdrawableCents(['ca-1', 'ca-2'], 'card-1', 'eudes');
     expect(out).toEqual([
-      { accountId: 'ca-1', cents: 123456 },
-      { accountId: 'ca-2', cents: 500 },
+      { accountId: 'ca-1', cents: 75867 },
+      { accountId: 'ca-2', cents: null },
     ]);
     expect(call).toHaveBeenCalledWith({
       service: 'wealthsimple',
@@ -83,10 +101,18 @@ describe('fetchWithdrawableCents', () => {
     });
   });
 
-  it('reports unknown balances as null instead of zero', async () => {
-    const { client } = makeClient(async () => ok([{ account_id: 'ca-1' }]));
-    expect(await client.fetchWithdrawableCents(['ca-1'], 'card-1', 'eudes')).toEqual([
+  it('reports withdrawal-disabled and shape-unknown accounts as null, never zero', async () => {
+    const { client } = makeClient(async () =>
+      ok({
+        eudes: [
+          { id: 'ca-1', funding_flow_policy: { withdrawal_enabled: false } },
+          { id: 'ca-2' },
+        ],
+      }),
+    );
+    expect(await client.fetchWithdrawableCents(['ca-1', 'ca-2'], 'card-1', 'eudes')).toEqual([
       { accountId: 'ca-1', cents: null },
+      { accountId: 'ca-2', cents: null },
     ]);
   });
 });
