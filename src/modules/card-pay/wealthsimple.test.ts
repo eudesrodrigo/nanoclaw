@@ -39,11 +39,43 @@ describe('fetchCashAccounts', () => {
     const { client } = makeClient(async () =>
       ok({
         eudes: [
-          { node: { id: 'ca-1', nickname: '🛒 Mercado e Gas', unified_account_type: 'CASH', currency: 'CAD', status: 'open' } },
-          { node: { id: 'tfsa-1', nickname: 'Stocks', unified_account_type: 'SELF_DIRECTED_TFSA', currency: 'CAD', status: 'open' } },
+          {
+            node: {
+              id: 'ca-1',
+              nickname: '🛒 Mercado e Gas',
+              unified_account_type: 'CASH',
+              currency: 'CAD',
+              status: 'open',
+            },
+          },
+          {
+            node: {
+              id: 'tfsa-1',
+              nickname: 'Stocks',
+              unified_account_type: 'SELF_DIRECTED_TFSA',
+              currency: 'CAD',
+              status: 'open',
+            },
+          },
           { node: { id: 'usd-1', nickname: 'USD', unified_account_type: 'CASH', currency: 'USD', status: 'open' } },
-          { node: { id: 'closed-1', nickname: 'Velha', unified_account_type: 'CASH', currency: 'CAD', status: 'closed' } },
-          { node: { id: 'open-flag-1', nickname: 'Só is_open', unified_account_type: 'CASH', currency: 'CAD', is_open: true } },
+          {
+            node: {
+              id: 'closed-1',
+              nickname: 'Velha',
+              unified_account_type: 'CASH',
+              currency: 'CAD',
+              status: 'closed',
+            },
+          },
+          {
+            node: {
+              id: 'open-flag-1',
+              nickname: 'Só is_open',
+              unified_account_type: 'CASH',
+              currency: 'CAD',
+              is_open: true,
+            },
+          },
         ],
       }),
     );
@@ -104,10 +136,7 @@ describe('fetchWithdrawableCents', () => {
   it('reports withdrawal-disabled and shape-unknown accounts as null, never zero', async () => {
     const { client } = makeClient(async () =>
       ok({
-        eudes: [
-          { id: 'ca-1', funding_flow_policy: { withdrawal_enabled: false } },
-          { id: 'ca-2' },
-        ],
+        eudes: [{ id: 'ca-1', funding_flow_policy: { withdrawal_enabled: false } }, { id: 'ca-2' }],
       }),
     );
     expect(await client.fetchWithdrawableCents(['ca-1', 'ca-2'], 'card-1', 'eudes')).toEqual([

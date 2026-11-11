@@ -77,7 +77,13 @@ export function processActivities(state: CardPayState, rows: Activity[], firstRu
     .sort((x, y) => ts(x.occurred_at) - ts(y.occurred_at));
   for (const p of payments) {
     const amount = cents(p.amount);
-    const isAutomated = state.attempts.some((a) => a.state === 'accepted' && a.amountCents === amount && ts(a.at) <= ts(p.occurred_at) && ts(p.occurred_at) <= ts(a.at) + 24 * 3600000);
+    const isAutomated = state.attempts.some(
+      (a) =>
+        a.state === 'accepted' &&
+        a.amountCents === amount &&
+        ts(a.at) <= ts(p.occurred_at) &&
+        ts(p.occurred_at) <= ts(a.at) + 24 * 3600000,
+    );
     const match = Object.values(state.seen).find(
       (s) => s.st === 'notified' && !isAutomated && s.amount === amount && ts(s.at) <= ts(p.occurred_at),
     );

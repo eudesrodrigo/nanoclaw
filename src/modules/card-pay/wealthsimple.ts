@@ -88,9 +88,10 @@ export function createWsClient(call: CallFn): WsClient {
       const rows = unwrapProfileRows(res.data, profile) as Record<string, unknown>[];
       return rows
         .map((outer) => {
-          const r = (typeof outer.node === 'object' && outer.node !== null
-            ? outer.node
-            : outer) as Record<string, unknown>;
+          const r = (typeof outer.node === 'object' && outer.node !== null ? outer.node : outer) as Record<
+            string,
+            unknown
+          >;
           const status = (firstString(r, ['status', 'state']) ?? '').toUpperCase();
           return {
             id: firstString(r, ['id', 'account_id', 'accountId']),
@@ -116,7 +117,11 @@ export function createWsClient(call: CallFn): WsClient {
       const rows = unwrapProfileRows(res.data, profile) as Record<string, unknown>[];
       const decimalToCents = (v: unknown): number | null => {
         const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN;
-        return typeof v === 'string' && !/^\d+(?:\.\d{1,2})?$/.test(v) ? null : Number.isFinite(n) && n >= 0 && Number.isSafeInteger(Math.round(n * 100)) ? Math.round(n * 100) : null;
+        return typeof v === 'string' && !/^\d+(?:\.\d{1,2})?$/.test(v)
+          ? null
+          : Number.isFinite(n) && n >= 0 && Number.isSafeInteger(Math.round(n * 100))
+            ? Math.round(n * 100)
+            : null;
       };
       return rows.map((r) => {
         const policy = (r.funding_flow_policy ?? {}) as Record<string, unknown>;
@@ -150,9 +155,10 @@ export function createWsClient(call: CallFn): WsClient {
       }
       if (res.status === 'ok') {
         const envelope = res.data as Record<string, unknown> | null;
-        const result = envelope && typeof envelope === 'object'
-          ? (envelope[input.profile] ?? envelope) as Record<string, unknown>
-          : null;
+        const result =
+          envelope && typeof envelope === 'object'
+            ? ((envelope[input.profile] ?? envelope) as Record<string, unknown>)
+            : null;
         if (result?.success === true) return { outcome: 'accepted' };
         if (result?.success === false) return { outcome: 'rejected', reason: 'Wealthsimple recusou o pagamento' };
         return { outcome: 'unknown', reason: 'Resposta de pagamento sem confirmação explícita' };

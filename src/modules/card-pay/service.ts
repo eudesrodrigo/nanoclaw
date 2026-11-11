@@ -219,7 +219,9 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
       if (p.currency !== 'CAD' || !Number.isSafeInteger(p.amountCents) || p.amountCents <= 0) {
         const seen = state.seen[p.key];
         if (seen) seen.st = 'blocked';
-        await sendToUser(`🔔 Nova compra no cartão\n${p.merchant} — $${p.amount} ${p.currency}\n\nCompra fora das condições de pagamento automático. Pague manualmente no app.`);
+        await sendToUser(
+          `🔔 Nova compra no cartão\n${p.merchant} — $${p.amount} ${p.currency}\n\nCompra fora das condições de pagamento automático. Pague manualmente no app.`,
+        );
         continue;
       }
       await createOffer(state, p);
@@ -267,19 +269,31 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
       return true;
     };
 
-    const content = typeof event.message.content === 'string' ? JSON.parse(event.message.content) : event.message.content;
+    const content =
+      typeof event.message.content === 'string' ? JSON.parse(event.message.content) : event.message.content;
     const identity = content?.telegramPayment;
-    if (event.sourceChannelType !== 'telegram' || identity?.eligible !== true ||
-      !/^[1-9]\d*$/.test(identity?.senderId ?? '') || userId !== `telegram:${identity.senderId}`) {
+    if (
+      event.sourceChannelType !== 'telegram' ||
+      identity?.eligible !== true ||
+      !/^[1-9]\d*$/.test(identity?.senderId ?? '') ||
+      userId !== `telegram:${identity.senderId}`
+    ) {
       return fail('A autorização precisa ser uma resposta original enviada pelo Telegram.');
     }
     if (!userId || !state.config.approverIds.includes(userId)) {
       return fail('Só Eudes ou Magda podem autorizar pagamentos.');
     }
-    if (offer.state === 'active' && (!Number.isFinite(Date.parse(offer.createdAt)) ||
-      deps.now() - Date.parse(offer.createdAt) >= OFFER_TTL_MS)) offer.state = 'expired';
-    if (!Number.isSafeInteger(offer.amountCents) || offer.amountCents <= 0 ||
-      offer.amountCents > MAX_PAYMENT_CENTS || offer.currency !== 'CAD') {
+    if (
+      offer.state === 'active' &&
+      (!Number.isFinite(Date.parse(offer.createdAt)) || deps.now() - Date.parse(offer.createdAt) >= OFFER_TTL_MS)
+    )
+      offer.state = 'expired';
+    if (
+      !Number.isSafeInteger(offer.amountCents) ||
+      offer.amountCents <= 0 ||
+      offer.amountCents > MAX_PAYMENT_CENTS ||
+      offer.currency !== 'CAD'
+    ) {
       offer.state = 'blocked';
       return fail('Compra fora das condições de pagamento automático. Pague manualmente no app.');
     }
@@ -310,12 +324,22 @@ export function createCardPayService(deps: CardPayDeps): CardPayService {
 
     let balance: number | null;
     try {
-      const rows = await ws.fetchActivities(state.config.cardId, state.config.profile,
-        new Date(deps.now() - WINDOW_DAYS * 864e5).toISOString());
+      const rows = await ws.fetchActivities(
+        state.config.cardId,
+        state.config.profile,
+        new Date(deps.now() - WINDOW_DAYS * 864e5).toISOString(),
+      );
       const matches = rows.filter((row) => row.type === 'purchase' && rootId(row.id) === offer.purchaseKey);
-      if (matches.length === 0 || matches.some((row) => row.status === 'reversed' ||
-        !['settled', 'pending', 'authorized', 'posted'].includes(row.status) ||
-        row.currency !== 'CAD' || cents(row.amount) !== offer.amountCents)) {
+      if (
+        matches.length === 0 ||
+        matches.some(
+          (row) =>
+            row.status === 'reversed' ||
+            !['settled', 'pending', 'authorized', 'posted'].includes(row.status) ||
+            row.currency !== 'CAD' ||
+            cents(row.amount) !== offer.amountCents,
+        )
+      ) {
         offer.state = 'invalidated';
         return fail('Compra cancelada ou alterada. Esta autorização não pode ser usada.');
       }

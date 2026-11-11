@@ -16,7 +16,14 @@ export function extractPaymentContext(raw: Record<string, unknown>): { senderId:
   const senderId = typeof id === 'number' && Number.isSafeInteger(id) && id > 0 ? String(id) : '';
   return {
     senderId,
-    eligible: Boolean(senderId) && from?.is_bot === false && !raw.sender_chat && !raw.edit_date &&
-      !raw.forward_origin && !raw.forward_from && !raw.forward_from_chat && !raw.forward_date,
+    eligible:
+      Boolean(senderId) &&
+      from?.is_bot === false &&
+      !raw.sender_chat &&
+      !raw.edit_date &&
+      !raw.forward_origin &&
+      !raw.forward_from &&
+      !raw.forward_from_chat &&
+      !raw.forward_date,
   };
 }

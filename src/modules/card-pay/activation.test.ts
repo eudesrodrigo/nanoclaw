@@ -8,21 +8,49 @@ import { createWsClient } from './wealthsimple.js';
 
 let dir: string;
 const now = Date.parse('2026-11-10T12:00:00Z');
-const activity = { id: 'p1', type: 'purchase', status: 'settled', amount: '10.00', currency: 'CAD', merchant_name: 'Store', occurred_at: '2026-11-10T11:00:00Z' };
+const activity = {
+  id: 'p1',
+  type: 'purchase',
+  status: 'settled',
+  amount: '10.00',
+  currency: 'CAD',
+  merchant_name: 'Store',
+  occurred_at: '2026-11-10T11:00:00Z',
+};
 const group = { platform_id: 'telegram:-100', is_group: 1 };
 const event = () => ({
-  channelType: 'telegram', sourceChannelType: 'telegram',
-  message: { content: { text: '1', replyTo: { messageId: 555 }, telegramPayment: { senderId: '123', eligible: true } } },
+  channelType: 'telegram',
+  sourceChannelType: 'telegram',
+  message: {
+    content: { text: '1', replyTo: { messageId: 555 }, telegramPayment: { senderId: '123', eligible: true } },
+  },
 });
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'card-activation-'));
   _setStatePathForTest(path.join(dir, 'state.json'));
   const state = loadState();
-  state.config = { enabled: true, chatPlatformId: group.platform_id, approverIds: ['telegram:123', 'telegram:456'], cardId: 'card', profile: 'eudes' };
+  state.config = {
+    enabled: true,
+    chatPlatformId: group.platform_id,
+    approverIds: ['telegram:123', 'telegram:456'],
+    cardId: 'card',
+    profile: 'eudes',
+  };
   state.seeded = true;
   state.seen.p1 = { st: 'notified', amount: 1000, merchant: 'Store', at: activity.occurred_at };
-  state.offers.push({ id: 'offer1', purchaseKey: 'p1', messageOutId: '-100:555', telegramMessageId: 555, merchant: 'Store', amountCents: 1000, currency: 'CAD', accounts: [{ num: 1, accountId: 'cash', name: 'Geral', balanceCents: 5000, observedAt: '12:00' }], createdAt: new Date(now).toISOString(), state: 'active' });
+  state.offers.push({
+    id: 'offer1',
+    purchaseKey: 'p1',
+    messageOutId: '-100:555',
+    telegramMessageId: 555,
+    merchant: 'Store',
+    amountCents: 1000,
+    currency: 'CAD',
+    accounts: [{ num: 1, accountId: 'cash', name: 'Geral', balanceCents: 5000, observedAt: '12:00' }],
+    createdAt: new Date(now).toISOString(),
+    state: 'active',
+  });
   saveState(state);
 });
 afterEach(() => {
@@ -38,7 +66,13 @@ function fixture(rows = [activity]) {
     payCard: vi.fn(async () => ({ outcome: 'accepted' as const })),
   };
   const send = vi.fn(async () => '-100:556');
-  const service = createCardPayService({ ws, send, now: () => now, uuid: () => 'key1', resolveTelegramMessageId: () => 555 });
+  const service = createCardPayService({
+    ws,
+    send,
+    now: () => now,
+    uuid: () => 'key1',
+    resolveTelegramMessageId: () => 555,
+  });
   return { ws, send, service };
 }
 
@@ -93,13 +127,22 @@ describe('payment activation boundary', () => {
   it('requires explicit mutation success from the configured profile', async () => {
     for (const data of [{}, 'ok', { magda: { success: true } }, { eudes: { success: false } }]) {
       const client = createWsClient(async () => ({ status: 'ok', data }));
-      const result = await client.payCard({ amountCents: 1000, cashAccountId: 'cash', creditAccountId: 'card', idempotencyKey: 'k', profile: 'eudes' });
+      const result = await client.payCard({
+        amountCents: 1000,
+        cashAccountId: 'cash',
+        creditAccountId: 'card',
+        idempotencyKey: 'k',
+        profile: 'eudes',
+      });
       expect(result.outcome).not.toBe('accepted');
     }
   });
 
   it('does not read accounts from another profile', async () => {
-    const client = createWsClient(async () => ({ status: 'ok', data: { magda: [{ id: 'other', type: 'CASH', currency: 'CAD', status: 'open' }] } }));
+    const client = createWsClient(async () => ({
+      status: 'ok',
+      data: { magda: [{ id: 'other', type: 'CASH', currency: 'CAD', status: 'open' }] },
+    }));
     await expect(client.fetchCashAccounts('eudes')).rejects.toThrow();
   });
 
@@ -107,9 +150,20 @@ describe('payment activation boundary', () => {
     const state = loadState();
     state.seen.p1.st = 'paid';
     state.seen.p2 = { ...state.seen.p1, st: 'notified' };
-    state.attempts.push({ offerId: 'offer1', userId: 'telegram:123', accountId: 'cash', amountCents: 1000, idempotencyKey: 'old-key', state: 'accepted', at: activity.occurred_at });
+    state.attempts.push({
+      offerId: 'offer1',
+      userId: 'telegram:123',
+      accountId: 'cash',
+      amountCents: 1000,
+      idempotencyKey: 'old-key',
+      state: 'accepted',
+      at: activity.occurred_at,
+    });
     saveState(state);
-    const { service } = fixture([{ ...activity, id: 'p2' }, { ...activity, id: 'payment1', type: 'payment', occurred_at: new Date(now).toISOString() }]);
+    const { service } = fixture([
+      { ...activity, id: 'p2' },
+      { ...activity, id: 'payment1', type: 'payment', occurred_at: new Date(now).toISOString() },
+    ]);
     await service.pollOnce();
     expect(loadState().seen.p2.st).toBe('notified');
   });
@@ -117,7 +171,9 @@ describe('payment activation boundary', () => {
   it('never creates a payable offer for a foreign-currency purchase', async () => {
     const { service } = fixture([{ ...activity, id: 'usd', currency: 'USD' }]);
     await service.pollOnce();
-    expect(loadState().offers.filter((offer) => offer.purchaseKey === 'usd' && offer.state === 'active')).toHaveLength(0);
+    expect(loadState().offers.filter((offer) => offer.purchaseKey === 'usd' && offer.state === 'active')).toHaveLength(
+      0,
+    );
   });
 
   it('retries only confirmation delivery after an accepted payment', async () => {
@@ -143,7 +199,13 @@ describe('payment activation boundary', () => {
   it('validates and pays only the persisted amount and account', async () => {
     const { service, ws } = fixture();
     await service.handleInbound(event(), group, 'telegram:123');
-    expect(ws.payCard).toHaveBeenCalledWith({ amountCents: 1000, cashAccountId: 'cash', creditAccountId: 'card', idempotencyKey: 'key1', profile: 'eudes' });
+    expect(ws.payCard).toHaveBeenCalledWith({
+      amountCents: 1000,
+      cashAccountId: 'cash',
+      creditAccountId: 'card',
+      idempotencyKey: 'key1',
+      profile: 'eudes',
+    });
     expect(loadState().attempts[0].state).toBe('accepted');
   });
 });

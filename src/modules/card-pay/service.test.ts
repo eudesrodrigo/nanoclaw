@@ -74,7 +74,14 @@ const group = { platform_id: 'telegram:-100', is_group: 1 };
 const replyEvent = (text: string, messageId: number, senderId = 'telegram:123') => ({
   channelType: 'telegram',
   sourceChannelType: 'telegram',
-  message: { content: { text, senderId, telegramPayment: { senderId: senderId.replace('telegram:', ''), eligible: true }, replyTo: { text: 'aviso', sender: 'bot', messageId } } },
+  message: {
+    content: {
+      text,
+      senderId,
+      telegramPayment: { senderId: senderId.replace('telegram:', ''), eligible: true },
+      replyTo: { text: 'aviso', sender: 'bot', messageId },
+    },
+  },
 });
 
 beforeEach(() => {
@@ -276,11 +283,7 @@ describe('handleInbound', () => {
     const ws = makeWs({ fetchActivities: vi.fn(async () => [purchase('p1', '10.00')]) });
     const { svc } = await notifiedService(ws);
     expect(
-      await svc.handleInbound(
-        { channelType: 'telegram', message: { content: { text: '2' } } },
-        group,
-        'telegram:123',
-      ),
+      await svc.handleInbound({ channelType: 'telegram', message: { content: { text: '2' } } }, group, 'telegram:123'),
     ).toBe(false);
     expect(await svc.handleInbound(replyEvent('2', 999), group, 'telegram:123')).toBe(false);
   });
